@@ -1,5 +1,18 @@
 [book]
-authors = ["517ANT39"]
-language = "en"
+authors = ["Tashchilin Anton"]
+language = "ru"
 src = "src"
-title = "y"
+title = "project description"
+
+[build]
+build-dir = "book"
+create-missing = true
+
+[preprocessor.drawio]
+command = "mdbook-drawio"
+[preprocessor.plantuml]
+command="mdbook-plantuml -l"
+
+[output.html]
+additional-css = ["src/_assets/custom.css"]
+additional-js = []

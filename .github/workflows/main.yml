@@ -1,0 +1,54 @@
+name: Deploy mdBook
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Setup mdBook
+        uses: peaceiris/actions-mdbook@v1
+        with:
+          mdbook-version: 0.4.52
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.90.0
+          profile: minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "_tools/mdbook-drawio -> target"
+
+      - name: Build Drawio Preprocessor
+        run: |
+          cd project-description/_tools/mdbook-drawio
+          cargo build --release
+          sudo cp target/release/mdbook-drawio /usr/local/bin/
+      
+      - name: Add PlantUml Preprocessor
+        run: |
+          cargo install --version "1.0.0-rc.1" mdbook-plantuml 
+          sudo cp /home/runner/.cargo/bin/mdbook-plantuml /usr/local/bin/
+          sudo apt update && sudo apt install plantuml
+      
+      - name: Build Book
+        run: |
+          cd project-description
+          mdbook build
+
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        if: ${{ github.ref == 'refs/heads/main' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./project-description/book

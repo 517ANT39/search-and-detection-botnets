@@ -1,4 +1,4 @@
-#include "monitoring-agent/core/processes_monitor.hpp"
+#include "monitoring-agent/core/ProcessesMonitor.hpp"
 
 ProcessesMonitor::ProcessesMonitor()
 {
@@ -9,14 +9,14 @@ ProcessesMonitor::~ProcessesMonitor()
 }
 
 
-void ProcessesMonitor::fillMainInfoProcess(const process_info& process_info,const fs::path& path){
-     path.filename().string().assign(process_info.name);
+void ProcessesMonitor::fillMainInfoProcess(const ProcessInfo& ProcessInfo,const fs::path& path){
+     path.filename().string().assign(ProcessInfo.name);
 }
 
 
-std::vector<process_info> ProcessesMonitor::getInfoProcess()
+std::vector<ProcessInfo> ProcessesMonitor::getInfoProcess()
 {
-    std::vector<process_info> processes_info;
+    std::vector<ProcessInfo> processes_info;
     try
     {
         for (const auto &entry : fs::directory_iterator(proc_path))
@@ -32,10 +32,10 @@ std::vector<process_info> ProcessesMonitor::getInfoProcess()
 
             if (std::regex_match(name, pid_re))
             {
-                process_info process_info;
+                ProcessInfo ProcessInfo;
 
-                process_info.pid = std::stol(name);
-                processes_info.push_back(process_info);
+                ProcessInfo.pid = std::stol(name);
+                processes_info.push_back(ProcessInfo);
 
             }
         }

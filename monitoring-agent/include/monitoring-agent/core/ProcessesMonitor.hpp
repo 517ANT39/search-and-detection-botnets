@@ -4,7 +4,7 @@
 #include <filesystem>
 #include <chrono>
 #include <regex>
-#include "monitoring-agent/domain/process_info.hpp"
+#include "monitoring-agent/domain/ProcessInfo.hpp"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -25,13 +25,13 @@ private:
     #endif
 
     #ifdef _WIN32
-    void fillMainInfoProcess(const process_info& process_info);
+    void fillMainInfoProcess(const ProcessInfo& ProcessInfo);
     #else
-    void fillMainInfoProcess(const process_info& process_info,const fs::path& path);
+    void fillMainInfoProcess(const ProcessInfo& ProcessInfo,const fs::path& path);
     #endif
 
 public:
-    std::vector<process_info> getInfoProcess();
+    std::vector<ProcessInfo> getInfoProcess();
     ProcessesMonitor(/* args */);
     ~ProcessesMonitor(/* args */);
 

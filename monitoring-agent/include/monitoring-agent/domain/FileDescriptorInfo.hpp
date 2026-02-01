@@ -3,7 +3,7 @@
 #include <string>
 #include <optional>
 
-struct file_descriptor_info
+struct FileDescriptorInfo
 {
     
     int32_t fd  = -1;

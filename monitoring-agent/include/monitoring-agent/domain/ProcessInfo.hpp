@@ -1,10 +1,10 @@
 #pragma once
 #include<string>
 #include<vector>
-#include"net_connection_info.hpp"
-#include"file_descriptor_info.hpp"
+#include"NetConnectionInfo.hpp"
+#include"FileDescriptorInfo.hpp"
 
-struct process_info
+struct ProcessInfo
 {
     pid_t pid;
     pid_t parent_pid;
@@ -25,7 +25,7 @@ struct process_info
     unsigned long shared;     // Разделяемая память
     unsigned int mem_percent;       // Процент памяти
 
-    std::vector<net_connection_info> net_connection_infos;
-    std::vector<file_descriptor_info> file_descriptor_infos;
+    std::vector<NetConnectionInfo> NetConnectionInfos;
+    std::vector<FileDescriptorInfo> FileDescriptorInfos;
 
 };

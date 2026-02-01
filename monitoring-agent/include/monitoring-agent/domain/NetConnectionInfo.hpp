@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <string>
 
-struct net_connection_info
+struct NetConnectionInfo
 {
     // 1) Временная привязка (для polling)
     uint64_t snapshot_time_ns = 0;

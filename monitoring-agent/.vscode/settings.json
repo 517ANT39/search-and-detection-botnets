@@ -1,5 +1,15 @@
 {
     "files.associations": {
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "regex": "cpp",
+        "deque": "cpp",
+        "forward_list": "cpp",
+        "list": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "executor": "cpp",
+        "socket": "cpp",
+        "system_error": "cpp",
+        "array": "cpp"
     }
 }

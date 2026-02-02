@@ -1,20 +1,10 @@
-import psutil
-import os
-from dotenv import load_dotenv
-load_dotenv()
-
+import time
+from constants import TIME_SEND_DATA
+from utils import *
 
 if __name__ == "__main__":
-    # Добавляем необходимые поля для дополнительной информации
-    fields = ['pid', 'name', 'username', 'cpu_percent', 'memory_info', 'cmdline', 'environ', 'open_files']
-    # Итерация по всем запущенным процессам
-    for proc in psutil.process_iter(fields):
-        try:
-            if proc.pid != os.getpid():  # Пропускаем собственный процесс
-                info = proc.info
-                print(info)
-                connections = proc.net_connections()
-                print(connections)
-
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
+    while True:
+        with pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL_CONNECT)) as connection:
+            send_info_host(connection)
+            send_info_processes(connection)
+        time.sleep(TIME_SEND_DATA)

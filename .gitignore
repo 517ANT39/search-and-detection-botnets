@@ -3,3 +3,4 @@
 target
 .mdbook-plantuml-cache
 *.log
+*.env

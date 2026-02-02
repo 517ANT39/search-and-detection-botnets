@@ -1,0 +1,9 @@
+
+services:
+  rabbitmq:
+    image: rabbitmq:alpine
+    container_name: rabbitmq
+    env_file:
+      - envs/rabbitmq.env
+    ports:
+      - 5672:5672

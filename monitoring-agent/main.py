@@ -1,10 +1,8 @@
-import time
 from constants import TIME_SEND_DATA
-from utils import *
-
+from send_info_about_system import *
+from apscheduler.schedulers.blocking import BlockingScheduler
 if __name__ == "__main__":
-    while True:
-        with pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL_CONNECT)) as connection:
-            send_info_host(connection)
-            send_info_processes(connection)
-        time.sleep(TIME_SEND_DATA)
+    scheduler = BlockingScheduler()
+    send_info_host()
+    scheduler.add_job(send_info_processes, "interval", seconds=TIME_SEND_DATA)
+    scheduler.start()

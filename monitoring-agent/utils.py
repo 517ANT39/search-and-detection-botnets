@@ -1,17 +1,8 @@
-import json
-import pika
-import psutil
+import hashlib
+from uuid import getnode as get_mac_address
 
-from constants import RABBITMQ_URL_CONNECT, PROCESS_INFO_FIELDS, CURR_PID
-
-
-def send_info_host(connection):
-    with connection.channel() as channel:
-        channel.basic_publish(exchange='', routing_key='info', body='info')
-
-def send_info_processes(connection):
-    with connection.channel() as channel:
-        for proc in psutil.process_iter(PROCESS_INFO_FIELDS):
-            if proc.pid != CURR_PID:
-                info = proc.info
-                connections = proc.net_connections()
+def generate_host_id(hostname):
+    mac = hex(get_mac_address())[2:] # Удаляем префикс '0x'
+    data = f"{hostname}-{mac}"
+    hashed_data = hashlib.sha256(data.encode()).hexdigest()
+    return hashed_data

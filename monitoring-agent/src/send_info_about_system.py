@@ -18,6 +18,7 @@ def send_info_processes():
                     io_counters = proc.io_counters()
                     info["connections"] = connections
                     info["io_counters"] = io_counters
+                    info["host_id"] = CURR_INFO_SYSTEM["host_id"]
                     producer.produce(topic=PROCESSES_INFO_TOPIC,key=CURR_INFO_SYSTEM["host_id"],value=info)
             except:
                 pass

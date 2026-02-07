@@ -13,7 +13,11 @@ CURR_INFO_SYSTEM = {
     "host_id": generate_host_id(_UNAME[1])
 }
 
-KAFKA_SERVERS = os.getenv('KAFKA_SERVERS')
+CONFIG_PRODUCER = {
+    'bootstrap.servers': os.getenv('KAFKA_SERVERS'),
+    'log_level': 3,
+    'compression.type': 'lz4'
+}
 PROCESS_INFO_FIELDS = ['pid', 'name', 'username', 'cpu_percent', 'memory_info', 'cmdline', 'environ', 'open_files']
 TIME_SEND_DATA = int(os.getenv('TIME_SEND_DATA',"0"))
 PROCESSES_INFO_TOPIC = os.getenv('PROCESSES_INFO_TOPIC')

@@ -1,13 +1,20 @@
 import json
-from kafka import KafkaProducer
-from constants import KAFKA_SERVERS
+from confluent_kafka import Producer
+from constants import CONFIG_PRODUCER
 
-producer = KafkaProducer(
-    bootstrap_servers=KAFKA_SERVERS,
-    value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-    compression_type='gzip',
-)
+class ProducerIml(Producer):
 
-def send_data(topic, data,key=None):
-    future = producer.send(topic, key=key, value=data)
-    future.get(timeout=10)
+    def produce(
+        self,
+        topic,
+        value = None,
+        key = None,
+        partition = -1,
+        callback = None,
+        on_delivery = None,
+        timestamp = 0,
+        headers = None,
+    ):
+        super().produce(topic, json.dumps(value).encode("utf-8"), key, partition, callback, on_delivery, timestamp, headers)
+
+producer = ProducerIml(CONFIG_PRODUCER)

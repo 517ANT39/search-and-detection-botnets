@@ -34,3 +34,7 @@ services:
       - 19000:9000
     ulimits:
       nofile: 262144
+    volumes:
+      - ./clickhouse-custom-configuration/sql:/docker-entrypoint-initdb.d/
+    depends_on:
+      - kafka

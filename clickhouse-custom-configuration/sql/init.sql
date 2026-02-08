@@ -22,8 +22,7 @@ create table info_processes_running_in_servers (
   SETTINGS kafka_broker_list = 'kafka:9092',
           kafka_topic_list = 'processes_info',
           kafka_group_name = 'info_processes_running_in_servers_consumer',
-          kafka_format = 'JSONEachRow',
-          kafka_num_consumers = 1;
+          kafka_format = 'JSONEachRow';
 
 CREATE TABLE data_info_processes_running_in_servers (
     username String,

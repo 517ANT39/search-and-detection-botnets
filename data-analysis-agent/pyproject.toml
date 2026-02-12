@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "data-analysis-agent"
+version = "0.1.0"
+description = ""
+authors = ["517ANT39 <toni.tashchilin@inbox.ru>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+notebook = "^7.5.3"
+chdb = "^4.0.1"
+requests = "^2.32.5"
+matplotlib = "^3.10.8"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

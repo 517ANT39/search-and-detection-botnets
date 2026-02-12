@@ -26,3 +26,19 @@ def send_info_processes():
         producer.flush()
     except:
         pass
+
+if __name__ == '__main__':
+    import json
+    for proc in psutil.process_iter(PROCESS_INFO_FIELDS):
+        try:
+            if proc.pid != CURR_PID:
+                info = proc.info
+                connections = proc.net_connections()
+                io_counters = proc.io_counters()
+                info["memory_info"] = info["memory_info"]._asdict()
+                info["connections"] = list(map(lambda c: c._asdict(), connections))
+                info["io_counters"] = io_counters._asdict()
+                info["host_id"] = CURR_INFO_SYSTEM["host_id"]
+                print(json.dumps(info))
+        except:
+            pass

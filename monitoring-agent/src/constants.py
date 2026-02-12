@@ -18,7 +18,7 @@ CONFIG_PRODUCER = {
     'log_level': 3,
     'compression.type': 'lz4'
 }
-PROCESS_INFO_FIELDS = ['pid', 'name', 'username', 'cpu_percent', 'memory_info', 'cmdline', 'environ', 'open_files']
+PROCESS_INFO_FIELDS = ['pid', 'name', 'cpu_percent', 'memory_info', 'cmdline']
 TIME_SEND_DATA = int(os.getenv('TIME_SEND_DATA',"0"))
 PROCESSES_INFO_TOPIC = os.getenv('PROCESSES_INFO_TOPIC')
 SYSTEM_INFO_TOPIC = os.getenv('SYSTEM_INFO_TOPIC')

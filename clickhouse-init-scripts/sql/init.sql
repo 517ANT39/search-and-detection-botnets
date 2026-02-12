@@ -16,7 +16,7 @@ create table info_processes_running_in_servers (
    ),
    pid UInt32,
    connections Array(String),
-   io_counters Tuple(UInt32, UInt32, UInt32, UInt32, UInt32, UInt32), -- IO статистики
+   io_counters Map(String,UInt32),
    host_id String
 ) ENGINE = Kafka
   SETTINGS kafka_broker_list = 'kafka:9092',

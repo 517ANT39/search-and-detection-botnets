@@ -16,8 +16,9 @@ def send_info_processes():
                     info = proc.info
                     connections = proc.net_connections()
                     io_counters = proc.io_counters()
-                    info["connections"] = connections
-                    info["io_counters"] = io_counters
+                    info["memory_info"] = info["memory_info"]._asdict()
+                    info["connections"] = list(map(lambda c: c._asdict(), connections))
+                    info["io_counters"] = io_counters._asdict()
                     info["host_id"] = CURR_INFO_SYSTEM["host_id"]
                     producer.produce(topic=PROCESSES_INFO_TOPIC,key=CURR_INFO_SYSTEM["host_id"],value=info)
             except:

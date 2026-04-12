@@ -1,0 +1,3 @@
+[submodule "monitoring-agent/libbpf"]
+	path = monitoring-agent/libbpf
+	url = https://github.com/libbpf/libbpf.git

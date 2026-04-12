@@ -1,0 +1,53 @@
+# ── Идентификация ───────────────────────────────────────────
+host_id: ""
+host_id_file: "/var/lib/monitoring-agent/host_id"
+
+# ── gRPC-коллектор ──────────────────────────────────────────
+server:
+  address: "10.0.0.1:50051"
+  insecure: true
+  # tls_cert: ""
+  # tls_key:  ""
+  # tls_ca:   ""
+
+# ── Режим захвата ───────────────────────────────────────────
+# mode: "interface" или "cgroup"
+#
+# direction: "ingress" | "egress" | "both"
+#
+# ┌────────────┬───────────┬────────────────────────────────────┐
+# │ mode       │ direction │ что подключается                   │
+# ├────────────┼───────────┼────────────────────────────────────┤
+# │ interface  │ ingress   │ XDP                                │
+# │ interface  │ egress    │ TC classifier egress               │
+# │ interface  │ both      │ TC classifier ingress + egress     │
+# │ cgroup     │ ingress   │ cgroup_skb/ingress                 │
+# │ cgroup     │ egress    │ cgroup_skb/egress                  │
+# │ cgroup     │ both      │ cgroup_skb/ingress + egress        │
+# └────────────┴───────────┴────────────────────────────────────┘
+
+capture:
+  mode: "interface"           # interface | cgroup
+  direction: "both"           # ingress | egress | both
+
+  # Для mode=interface
+  interfaces:
+    - "eth0"
+
+  # XDP flags (только для ingress): 0=native, 2=skb-mode
+  xdp_flags: 0
+
+  # Для mode=cgroup
+  cgroup_path: "/sys/fs/cgroup"
+
+# ── Батчинг ────────────────────────────────────────────────
+batch:
+  size: 256
+  flush_interval: "1s"
+  channel_size: 8192
+
+# perf buffer на каждый CPU (байты, степень двойки)
+perf_per_cpu_buffer: 65536     # 64 KiB
+
+# ── Логирование ────────────────────────────────────────────
+log_level: "info"

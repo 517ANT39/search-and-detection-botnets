@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package traffic;
+
+option go_package = "traffic-agent/gen/traffic";
+
+/* ── Enums ──────────────────────────────────────────────── */
+
+enum HookType {
+    HOOK_TC         = 0;
+    HOOK_XDP        = 1;
+    HOOK_CGROUP_SKB = 2;
+}
+
+enum Direction {
+    INGRESS = 0;
+    EGRESS  = 1;
+}
+
+/* ── Host registration ──────────────────────────────────── */
+
+message HostInfo {
+    string host_id        = 1;
+    string hostname       = 2;
+    string os             = 3;
+    string arch           = 4;
+    string kernel_version = 5;
+    repeated string interfaces = 6;
+    int64  boot_time_sec  = 7;
+    int64  register_ts    = 8;
+}
+
+message RegisterResponse {
+    bool   ok      = 1;
+    string message = 2;
+}
+
+/* ── Packet events ──────────────────────────────────────── */
+
+message PacketEvent {
+    uint64    timestamp_ns = 1;
+    fixed32   src_ip       = 2;
+    fixed32   dst_ip       = 3;
+    uint32    src_port     = 4;
+    uint32    dst_port     = 5;
+    uint32    pkt_len      = 6;
+    uint32    protocol     = 7;
+    HookType  hook         = 8;
+    Direction direction    = 9;
+    uint32    ifindex      = 10;
+}
+
+message PacketBatch {
+    string host_id              = 1;
+    int64  batch_ts             = 2;
+    repeated PacketEvent events = 3;
+}
+
+message BatchResponse {
+    bool   ok             = 1;
+    uint64 received_count = 2;
+}
+
+/* ── Service ────────────────────────────────────────────── */
+
+service TrafficCollector {
+    rpc RegisterHost    (HostInfo)    returns (RegisterResponse);
+    rpc SendPacketBatch (PacketBatch) returns (BatchResponse);
+}

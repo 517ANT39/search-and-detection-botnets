@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="row g-3 mb-4" id="summary-cards">
+    <div class="col-md-3"><div class="card bg-dark border-info"><div class="card-body text-center">
+        <h6 class="text-muted">Packets (1h)</h6><h2 class="text-info" id="card-packets">—</h2>
+    </div></div></div>
+    <div class="col-md-3"><div class="card bg-dark border-success"><div class="card-body text-center">
+        <h6 class="text-muted">Traffic (1h)</h6><h2 class="text-success" id="card-bytes">—</h2>
+    </div></div></div>
+    <div class="col-md-3"><div class="card bg-dark border-danger"><div class="card-body text-center">
+        <h6 class="text-muted">Unresolved Alerts</h6><h2 class="text-danger" id="card-alerts">—</h2>
+    </div></div></div>
+    <div class="col-md-3"><div class="card bg-dark border-warning"><div class="card-body text-center">
+        <h6 class="text-muted">Critical</h6><h2 class="text-warning" id="card-critical">—</h2>
+    </div></div></div>
+</div>
+
+<div class="row mb-3">
+    <div class="col-auto">
+        <select id="time-range" class="form-select form-select-sm bg-dark text-light border-secondary">
+            <option value="15">15 min</option><option value="60" selected>1 hour</option>
+            <option value="360">6 hours</option><option value="1440">24 hours</option>
+        </select>
+    </div>
+    <div class="col-auto"><button id="btn-refresh" class="btn btn-sm btn-outline-light"><i class="bi bi-arrow-clockwise"></i> Refresh</button></div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-8"><div class="card bg-dark border-secondary"><div class="card-header"><i class="bi bi-graph-up"></i> Timeline</div><div class="card-body"><canvas id="chart-timeline" height="100"></canvas></div></div></div>
+    <div class="col-lg-4"><div class="card bg-dark border-secondary"><div class="card-header"><i class="bi bi-pie-chart"></i> Protocols</div><div class="card-body"><canvas id="chart-protocols" height="200"></canvas></div></div></div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-6"><div class="card bg-dark border-secondary"><div class="card-header"><i class="bi bi-bar-chart"></i> Top Talkers</div><div class="card-body"><canvas id="chart-talkers" height="150"></canvas></div></div></div>
+    <div class="col-lg-6"><div class="card bg-dark border-secondary"><div class="card-header"><i class="bi bi-hdd-stack"></i> Per Host</div><div class="card-body"><canvas id="chart-hosts" height="150"></canvas></div></div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

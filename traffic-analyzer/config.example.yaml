@@ -1,0 +1,34 @@
+app:
+  secret_key: "change-me-super-secret-key-here"
+  debug: true
+
+postgres:
+  uri: "postgresql://analyzer:analyzer_pass@localhost:5432/traffic_analyzer"
+
+clickhouse:
+  host: "localhost"
+  port: 9000
+  database: "traffic"
+  username: "traffic"
+  password: "traffic_pass"
+
+mail:
+  server: "smtp.example.com"
+  port: 587
+  use_tls: true
+  username: "alerts@example.com"
+  password: "mail_pass"
+  default_sender: "Traffic Analyzer <alerts@example.com>"
+
+analyzer:
+  # Расписание анализа (cron)
+  schedule_minutes: 5
+  # IsolationForest параметры по умолчанию
+  contamination: 0.05
+  n_estimators: 200
+  # Окно анализа
+  window_minutes: 10
+  # Минимум пакетов для анализа
+  min_samples: 100
+
+

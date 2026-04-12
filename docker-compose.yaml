@@ -1,0 +1,11 @@
+services:
+  clickhouse-traffic:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: clickhouse-traffic
+    ports:
+      - "9000:9000"
+      - "8123:8123"
+    environment:
+      CLICKHOUSE_DB: traffic
+      CLICKHOUSE_USER: traffic
+      CLICKHOUSE_PASSWORD: traffic_pass

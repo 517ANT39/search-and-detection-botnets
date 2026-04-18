@@ -28,13 +28,11 @@ func main() {
 
 	logger := makeLogger(cfg.LogLevel)
 
-	// ── Описание выбранного режима ─────────────────────────
 	logger.Info("capture mode",
 		"mode", cfg.Capture.Mode,
 		"direction", cfg.Capture.Direction,
 	)
 
-	// ── Host info ──────────────────────────────────────────
 	info, err := hostinfo.Collect(cfg)
 	if err != nil {
 		logger.Error("hostinfo", "err", err)
@@ -46,17 +44,15 @@ func main() {
 		"kernel", info.KernelVersion,
 	)
 
-	// ── Event channel ──────────────────────────────────────
 	chSz := cfg.Batch.ChannelSize
 	if chSz <= 0 {
 		chSz = 8192
 	}
-	eventCh := make(chan bpfprog.PacketEvent, chSz)
+	eventCh := make(chan bpfprog.RealPacketEvent, chSz) // ← RealPacketEvent
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// ── gRPC ───────────────────────────────────────────────
 	snd := sender.New(cfg, info, eventCh, logger)
 	if err := snd.Connect(ctx); err != nil {
 		logger.Error("grpc", "err", err)
@@ -64,7 +60,6 @@ func main() {
 	}
 	defer snd.Close()
 
-	// ── eBPF ───────────────────────────────────────────────
 	coll := bpfprog.NewCollector(cfg, eventCh, logger)
 	if err := coll.Load(); err != nil {
 		logger.Error("ebpf load", "err", err)
@@ -77,7 +72,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── Goroutines ─────────────────────────────────────────
 	var wg sync.WaitGroup
 
 	wg.Add(1)
@@ -91,7 +85,6 @@ func main() {
 	wg.Add(1)
 	go snd.SendLoop(ctx, &wg)
 
-	// ── Graceful shutdown ──────────────────────────────────
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh

@@ -34,14 +34,7 @@ func Collect(cfg *config.Config) (*Info, error) {
 	kernel := readLine("/proc/sys/kernel/osrelease")
 	bootTime := readBootTime()
 
-	ifaces, _ := net.Interfaces()
-	var names []string
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		names = append(names, iface.Name)
-	}
+	activeIfaces := getActiveInterfaces()
 
 	return &Info{
 		HostID:        hostID,
@@ -49,10 +42,56 @@ func Collect(cfg *config.Config) (*Info, error) {
 		OS:            runtime.GOOS,
 		Arch:          runtime.GOARCH,
 		KernelVersion: kernel,
-		Interfaces:    names,
+		Interfaces:    activeIfaces,
 		BootTimeSec:   bootTime,
 		RegisterTS:    time.Now().UnixNano(),
 	}, nil
+}
+func getActiveInterfaces() []string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+
+	var active []string
+	for _, iface := range ifaces {
+		// Пропускаем loopback
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		// Пропускаем интерфейсы без флага UP
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		// Проверяем наличие хотя бы одного IP-адреса
+		addrs, err := iface.Addrs()
+		if err != nil || len(addrs) == 0 {
+			continue
+		}
+
+		// Проверяем что есть хотя бы один не-link-local адрес
+		hasUsableAddr := false
+		for _, addr := range addrs {
+			ip, _, err := net.ParseCIDR(addr.String())
+			if err != nil {
+				continue
+			}
+			// Пропускаем link-local (fe80::, 169.254.x.x)
+			if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				continue
+			}
+			hasUsableAddr = true
+			break
+		}
+
+		if hasUsableAddr {
+			active = append(active, iface.Name)
+		}
+	}
+
+	return active
 }
 
 func resolveHostID(explicit, file string) (string, error) {

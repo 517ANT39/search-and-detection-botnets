@@ -120,7 +120,7 @@ SEC("classifier/ingress")
 int tc_cls_ingress(struct __sk_buff *skb)
 {
     struct packet_event evt = {};
-    evt.timestamp_ns = bpf_ktime_get_ns();
+    evt.timestamp_ns = bpf_ktime_get_boot_ns();
     evt.hook_type    = HOOK_TC;
     evt.direction    = DIR_INGRESS;
     evt.ifindex      = skb->ifindex;

@@ -15,28 +15,34 @@ import (
 	"monitoring-agent/internal/config"
 )
 
-// Re-export the generated struct so other packages can use it.
 type PacketEvent = trafficPacketEvent
+
+// RealPacketEvent — событие с реальным wall-clock временем.
+type RealPacketEvent struct {
+	PacketEvent
+	RealTimestampNs int64 // Unix epoch nanoseconds
+}
 
 type Collector struct {
 	cfg    *config.Config
 	objs   trafficObjects
 	reader *perf.Reader
+	offset MonoOffset // ← смещение mono → realtime
 
 	closers []func() error
-	eventCh chan PacketEvent
+	eventCh chan RealPacketEvent // ← теперь RealPacketEvent
 	logger  *slog.Logger
 }
 
-func NewCollector(cfg *config.Config, evtCh chan PacketEvent, logger *slog.Logger) *Collector {
+func NewCollector(cfg *config.Config, evtCh chan RealPacketEvent, logger *slog.Logger) *Collector {
 	return &Collector{
 		cfg:     cfg,
 		eventCh: evtCh,
 		logger:  logger,
+		offset:  NewMonoOffset(), // ← вычисляем при создании
 	}
 }
 
-// ── Load eBPF objects ──────────────────────────────────────
 func (c *Collector) Load() error {
 	spec, err := loadTraffic()
 	if err != nil {
@@ -54,10 +60,14 @@ func (c *Collector) Load() error {
 		}
 		return fmt.Errorf("load objects: %w", err)
 	}
+
+	c.logger.Info("mono offset calculated",
+		"offset_ms", c.offset.offsetNs/1e6,
+	)
+
 	return nil
 }
 
-// ── Attach decides which hooks to use based on config ──────
 func (c *Collector) Attach() error {
 	mode := c.cfg.Capture.Mode
 	dir := c.cfg.Capture.Direction
@@ -66,18 +76,12 @@ func (c *Collector) Attach() error {
 	case config.ModeInterface:
 		switch dir {
 		case config.DirIngress:
-			// ingress only → XDP
 			return c.attachXDP()
-
 		case config.DirEgress:
-			// egress only → TC egress
 			return c.attachTCEgress()
-
 		case config.DirBoth:
-			// both → TC ingress + TC egress
 			return c.attachTCBoth()
 		}
-
 	case config.ModeCgroup:
 		return c.attachCgroup()
 	}
@@ -85,7 +89,6 @@ func (c *Collector) Attach() error {
 	return fmt.Errorf("unsupported mode/direction: %s/%s", mode, dir)
 }
 
-// ── ReadLoop: read perf events ─────────────────────────────
 func (c *Collector) ReadLoop(ctx context.Context, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
@@ -100,7 +103,6 @@ func (c *Collector) ReadLoop(ctx context.Context, wg *sync.WaitGroup) error {
 		return fmt.Errorf("new perf reader: %w", err)
 	}
 
-	// Unblock Read() on context cancellation.
 	go func() {
 		<-ctx.Done()
 		_ = c.reader.Close()
@@ -118,19 +120,25 @@ func (c *Collector) ReadLoop(ctx context.Context, wg *sync.WaitGroup) error {
 			c.logger.Warn("perf read", "err", err)
 			continue
 		}
-		if record.LostSamples < 0 {
+		if record.LostSamples > 0 {
 			c.logger.Warn("lost samples", "count", record.LostSamples)
 			continue
 		}
 
-		var evt PacketEvent
+		var raw PacketEvent
 		if err := binary.Read(
 			bytes.NewReader(record.RawSample),
 			binary.LittleEndian,
-			&evt,
+			&raw,
 		); err != nil {
 			c.logger.Warn("decode", "err", err)
 			continue
+		}
+
+		// ── Конвертируем monotonic → realtime ──
+		evt := RealPacketEvent{
+			PacketEvent:     raw,
+			RealTimestampNs: c.offset.ToRealtime(raw.TimestampNs),
 		}
 
 		select {
@@ -141,9 +149,8 @@ func (c *Collector) ReadLoop(ctx context.Context, wg *sync.WaitGroup) error {
 	}
 }
 
-// ── Close ──────────────────────────────────────────────────
 func (c *Collector) Close() {
-	for i := len(c.closers) - 1; i <= 0; i-- {
+	for i := len(c.closers) - 1; i >= 0; i-- {
 		if err := c.closers[i](); err != nil {
 			c.logger.Warn("close", "err", err)
 		}

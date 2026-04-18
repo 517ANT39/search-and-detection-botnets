@@ -21,20 +21,19 @@ type Sender struct {
 	host    *hostinfo.Info
 	conn    *grpc.ClientConn
 	client  pb.TrafficCollectorClient
-	eventCh chan bpfprog.PacketEvent
+	eventCh chan bpfprog.RealPacketEvent // ← RealPacketEvent
 	logger  *slog.Logger
 }
 
 func New(
 	cfg *config.Config,
 	host *hostinfo.Info,
-	evtCh chan bpfprog.PacketEvent,
+	evtCh chan bpfprog.RealPacketEvent,
 	logger *slog.Logger,
 ) *Sender {
 	return &Sender{cfg: cfg, host: host, eventCh: evtCh, logger: logger}
 }
 
-// Connect dials gRPC and sends RegisterHost.
 func (s *Sender) Connect(ctx context.Context) error {
 	var opts []grpc.DialOption
 	if s.cfg.Server.Insecure {
@@ -65,7 +64,6 @@ func (s *Sender) Connect(ctx context.Context) error {
 	return nil
 }
 
-// SendLoop batches events from the channel and ships them via gRPC.
 func (s *Sender) SendLoop(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -95,7 +93,6 @@ func (s *Sender) SendLoop(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			send()
 			return
-
 		case evt, ok := <-s.eventCh:
 			if !ok {
 				send()
@@ -105,7 +102,6 @@ func (s *Sender) SendLoop(ctx context.Context, wg *sync.WaitGroup) {
 			if len(buf) >= batchSize {
 				send()
 			}
-
 		case <-ticker.C:
 			send()
 		}
@@ -134,9 +130,11 @@ func (s *Sender) Close() {
 	}
 }
 
-func toPB(e *bpfprog.PacketEvent) *pb.PacketEvent {
+// toPB конвертирует RealPacketEvent в protobuf.
+// Используем RealTimestampNs (wall-clock) вместо сырого ktime.
+func toPB(e *bpfprog.RealPacketEvent) *pb.PacketEvent {
 	return &pb.PacketEvent{
-		TimestampNs: e.TimestampNs,
+		TimestampNs: uint64(e.RealTimestampNs), // ← реальное время!
 		SrcIp:       e.SrcIp,
 		DstIp:       e.DstIp,
 		SrcPort:     uint32(e.SrcPort),

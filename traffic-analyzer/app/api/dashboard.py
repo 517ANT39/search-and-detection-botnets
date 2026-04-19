@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, jsonify, request
+from flask import Blueprint, jsonify, request
 from flask_login import login_required
 
 from app.clickhouse.queries import (
@@ -7,23 +7,17 @@ from app.clickhouse.queries import (
 )
 from app.models import Alert
 
-dashboard_bp = Blueprint("dashboard", __name__)
+dashboard_bp = Blueprint("dashboard_api", __name__, url_prefix="/api/dashboard")
 
 
-@dashboard_bp.route("/")
-@login_required
-def index():
-    return render_template("dashboard.html")
-
-
-@dashboard_bp.route("/api/dashboard/summary")
+@dashboard_bp.route("/summary")
 @login_required
 def api_summary():
     minutes = request.args.get("minutes", 60, type=int)
     return jsonify(get_traffic_summary(minutes))
 
 
-@dashboard_bp.route("/api/dashboard/top-talkers")
+@dashboard_bp.route("/top-talkers")
 @login_required
 def api_top_talkers():
     minutes = request.args.get("minutes", 60, type=int)
@@ -31,14 +25,14 @@ def api_top_talkers():
     return jsonify(get_top_talkers(minutes, limit))
 
 
-@dashboard_bp.route("/api/dashboard/protocols")
+@dashboard_bp.route("/protocols")
 @login_required
 def api_protocols():
     minutes = request.args.get("minutes", 60, type=int)
     return jsonify(get_protocol_distribution(minutes))
 
 
-@dashboard_bp.route("/api/dashboard/timeline")
+@dashboard_bp.route("/timeline")
 @login_required
 def api_timeline():
     minutes = request.args.get("minutes", 60, type=int)
@@ -50,7 +44,7 @@ def api_timeline():
     return jsonify(data)
 
 
-@dashboard_bp.route("/api/dashboard/alerts-summary")
+@dashboard_bp.route("/alerts-summary")
 @login_required
 def api_alerts_summary():
     return jsonify({

@@ -1,50 +1,94 @@
-{% extends "base.html" %}
-{% block title %}Statistics{% endblock %}
-{% block content %}
-<h3><i class="bi bi-graph-up"></i> Network Statistics</h3>
-<div class="row mb-3 mt-3">
-    <div class="col-auto">
-        <select id="stats-range" class="form-select form-select-sm bg-dark text-light border-secondary">
-            <option value="60">1 hour</option><option value="360">6 hours</option>
-            <option value="1440" selected>24 hours</option><option value="10080">7 days</option>
+{% extends 'admin/master.html' %}
+
+{% block body %}
+<div class="container-fluid">
+    <div class="toolbar">
+        <h5 class="section-title mb-0"><i class="bi bi-graph-up"></i> Сетевая статистика</h5>
+        <select id="stats-range" class="form-select form-select-sm" style="width:auto;">
+            <option value="60">1 час</option>
+            <option value="360">6 часов</option>
+            <option value="1440" selected>24 часа</option>
+            <option value="10080">7 дней</option>
         </select>
     </div>
-</div>
-<div class="row g-3 mb-4">
-    <div class="col-12"><div class="card bg-dark border-secondary"><div class="card-header">Bandwidth</div>
-        <div class="card-body"><canvas id="chart-bw" height="80"></canvas></div></div></div>
-</div>
-<div class="row g-3 mb-4">
-    <div class="col-lg-6"><div class="card bg-dark border-secondary"><div class="card-header">Ingress vs Egress</div>
-        <div class="card-body"><canvas id="chart-dir" height="150"></canvas></div></div></div>
-    <div class="col-lg-6"><div class="card bg-dark border-secondary"><div class="card-header">Top Destinations</div>
-        <div class="card-body"><canvas id="chart-dst" height="150"></canvas></div></div></div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-activity"></i> Пропускная способность</div>
+                <div class="card-body"><canvas id="chart-bw" height="80"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-arrow-left-right"></i> Входящий / Исходящий</div>
+                <div class="card-body"><canvas id="chart-dir" height="180"></canvas></div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-geo-alt"></i> Топ-10 назначений</div>
+                <div class="card-body"><canvas id="chart-dst" height="180"></canvas></div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
-{% block scripts %}
+
+{% block tail_js %}
+{{ super() }}
 <script>
-Chart.defaults.color='#ccc'; Chart.defaults.borderColor='#333';
-const rng=document.getElementById('stats-range');
-let bwC,dirC,dstC;
-async function load(){
-    const m=rng.value, iv=m>360?300:60;
-    let r=await fetch(`/api/dashboard/timeline?minutes=${m}&amp;interval=${iv}`);
-    let d=await r.json();
-    if(bwC)bwC.destroy();
-    bwC=new Chart(document.getElementById('chart-bw'),{type:'line',{labels:d.map(r=>new Date(r.ts).toLocaleTimeString()),datasets:[
-        {label:'Ingress',d.map(r=>r.in_packets),borderColor:'#0dcaf0',fill:true,backgroundColor:'rgba(13,202,240,0.1)'},
-        {label:'Egress',d.map(r=>r.out_packets),borderColor:'#ffc107',fill:true,backgroundColor:'rgba(255,193,7,0.1)'}
-    ]},options:{responsive:true,scales:{y:{beginAtZero:true}}}});
+const rng = document.getElementById('stats-range');
+let bwC, dirC, dstC;
 
-    r=await fetch(`/api/dashboard/summary?minutes=${m}`); d=await r.json();
-    let tI=0,tO=0; d.forEach(r=>{tI+=r.ingress_bytes;tO+=r.egress_bytes;});
-    if(dirC)dirC.destroy();
-    dirC=new Chart(document.getElementById('chart-dir'),{type:'doughnut',{labels:['Ingress','Egress'],datasets:[{[tI,tO],backgroundColor:['#0dcaf0','#ffc107']}]}});
+async function loadStats() {
+    const m = rng.value, iv = m > 360 ? 300 : 60;
 
-    r=await fetch(`/api/dashboard/top-talkers?minutes=${m}&amp;limit=10`); d=await r.json();
-    if(dstC)dstC.destroy();
-    dstC=new Chart(document.getElementById('chart-dst'),{type:'bar',{labels:d.map(r=>r.dst),datasets:[{label:'Bytes',d.map(r=>r.bytes),backgroundColor:'#198754'}]},options:{indexAxis:'y',responsive:true}});
+    let r = await fetch(`/api/dashboard/timeline?minutes=${m}&interval=${iv}`);
+    let d = await r.json();
+    if(bwC) bwC.destroy();
+    bwC = new Chart(document.getElementById('chart-bw'), {
+        type:'line',
+        {
+            labels: d.map(r=>new Date(r.ts).toLocaleTimeString('ru-RU')),
+            datasets:[
+                {label:'Входящий', d.map(r=>r.in_packets), borderColor:'#2c6faa', fill:true, backgroundColor:'rgba(44,111,170,0.08)', tension:0.3},
+                {label:'Исходящий', d.map(r=>r.out_packets), borderColor:'#f0ad4e', fill:true, backgroundColor:'rgba(240,173,78,0.08)', tension:0.3},
+            ]
+        },
+        options:{responsive:true, scales:{y:{beginAtZero:true}}, plugins:{legend:{position:'top'}}}
+    });
+
+    r = await fetch(`/api/dashboard/summary?minutes=${m}`);
+    d = await r.json();
+    let tI=0, tO=0;
+    d.forEach(r=>{tI+=r.ingress_bytes; tO+=r.egress_bytes;});
+    if(dirC) dirC.destroy();
+    dirC = new Chart(document.getElementById('chart-dir'), {
+        type:'doughnut',
+        {
+            labels:['Входящий','Исходящий'],
+            datasets:[{[tI,tO], backgroundColor:['#2c6faa','#f0ad4e']}]
+        },
+        options:{responsive:true, plugins:{legend:{position:'bottom'}}}
+    });
+
+    r = await fetch(`/api/dashboard/top-talkers?minutes=${m}&limit=10`);
+    d = await r.json();
+    if(dstC) dstC.destroy();
+    dstC = new Chart(document.getElementById('chart-dst'), {
+        type:'bar',
+        {
+            labels: d.map(r=>r.dst),
+            datasets:[{label:'Байт', d.map(r=>r.bytes), backgroundColor:'#28a745'}]
+        },
+        options:{indexAxis:'y', responsive:true, scales:{x:{beginAtZero:true}}}
+    });
 }
-rng.onchange=load; load();
+rng.onchange = loadStats;
+loadStats();
 </script>
 {% endblock %}

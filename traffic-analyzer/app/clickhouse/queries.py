@@ -38,8 +38,15 @@ def _query_df(sql, params=None):
 
 def get_hosts():
     return _query_rows("""
-        SELECT host_id, hostname, os, arch, kernel_version,
-               interfaces, boot_time, registered_at
+        SELECT
+            host_id,
+            hostname,
+            os,
+            arch,
+            kernel_version,
+            interfaces,
+            boot_time,
+            registered_at
         FROM hosts FINAL
         ORDER BY registered_at DESC
     """)

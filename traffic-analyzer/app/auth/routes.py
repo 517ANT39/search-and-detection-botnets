@@ -14,15 +14,15 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 
 class LoginForm(FlaskForm):
-    email = StringField("Email", validators=[DataRequired()])
-    password = PasswordField("Password", validators=[DataRequired()])
-    remember = BooleanField("Remember me")
+    email = StringField("Эл. почта", validators=[DataRequired()])
+    password = PasswordField("Пароль", validators=[DataRequired()])
+    remember = BooleanField("Запомнить меня")
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard.index"))
+        return redirect(url_for("admin.index"))
 
     form = LoginForm()
 
@@ -34,16 +34,14 @@ def login():
             db.session.commit()
             login_user(user, remember=form.remember.data)
 
-            # Безопасный redirect на next
             next_url = request.args.get("next", "")
             if next_url:
                 parsed = urlparse(next_url)
-                # Принимаем только тот же хост или относительные пути
                 if not parsed.netloc or parsed.netloc == request.host:
                     return redirect(parsed.path or "/")
-            return redirect(url_for("dashboard.index"))
+            return redirect(url_for("admin.index"))
 
-        flash("Invalid email or password.", "danger")
+        flash("Неверный адрес электронной почты или пароль.", "danger")
 
     return render_template("login.html", form=form)
 
@@ -52,5 +50,5 @@ def login():
 @login_required
 def logout():
     logout_user()
-    flash("Logged out.", "info")
+    flash("Вы вышли из системы.", "info")
     return redirect(url_for("auth.login"))

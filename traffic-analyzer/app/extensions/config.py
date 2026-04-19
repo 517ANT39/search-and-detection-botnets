@@ -37,3 +37,4 @@ class Config:
     ANALYZER_MIN_SAMPLES = _c["analyzer"]["min_samples"]
 
     SCHEDULER_API_ENABLED = True
+    BABEL_DEFAULT_LOCALE = "ru"

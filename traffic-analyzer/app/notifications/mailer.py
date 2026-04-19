@@ -5,20 +5,33 @@ from app.models import NotificationGroup
 
 logger = logging.getLogger("notifications")
 
-TEMPLATE = """
-🚨 TRAFFIC ALERT: {title}
+SEV_RU = {
+    "critical": "КРИТИЧЕСКИЙ",
+    "high": "ВЫСОКИЙ",
+    "medium": "СРЕДНИЙ",
+    "low": "НИЗКИЙ",
+}
 
-Severity : {severity}
-Type     : {alert_type}
-Host     : {host_id}
-Source IP : {src_ip}
-Dest IP  : {dst_ip}
-Time     : {created_at}
+TYPE_RU = {
+    "anomaly": "Аномалия",
+    "port_scan": "Сканирование портов",
+    "ddos": "DDoS-атака",
+}
+
+TEMPLATE = """
+🚨 ОПОВЕЩЕНИЕ: {title}
+
+Критичность : {severity}
+Тип          : {alert_type}
+Узел         : {host_id}
+IP источника : {src_ip}
+IP назначения: {dst_ip}
+Время        : {created_at}
 
 {description}
 
 --
-Traffic Analyzer
+Анализатор сетевого трафика
 """
 
 
@@ -33,14 +46,17 @@ def send_alert_notifications(alert):
         if not emails:
             continue
 
-        subject = f"[{alert.severity.upper()}] {alert.title}"
+        sev_text = SEV_RU.get(alert.severity, alert.severity.upper())
+        type_text = TYPE_RU.get(alert.alert_type, alert.alert_type)
+
+        subject = f"[{sev_text}] {alert.title}"
         body = TEMPLATE.format(
             title=alert.title,
-            severity=alert.severity.upper(),
-            alert_type=alert.alert_type,
+            severity=sev_text,
+            alert_type=type_text,
             host_id=alert.host_id,
-            src_ip=alert.src_ip or "N/A",
-            dst_ip=alert.dst_ip or "N/A",
+            src_ip=alert.src_ip or "Н/Д",
+            dst_ip=alert.dst_ip or "Н/Д",
             created_at=alert.created_at,
             description=alert.description,
         )
@@ -48,6 +64,6 @@ def send_alert_notifications(alert):
         try:
             msg = Message(subject=subject, recipients=emails, body=body)
             mail.send(msg)
-            logger.info("Email sent to group '%s' (%d recip)", group.name, len(emails))
+            logger.info("Письмо отправлено группе '%s' (%d адр.)", group.name, len(emails))
         except Exception as e:
-            logger.error("Email to '%s' failed: %s", group.name, e)
+            logger.error("Ошибка отправки '%s': %s", group.name, e)

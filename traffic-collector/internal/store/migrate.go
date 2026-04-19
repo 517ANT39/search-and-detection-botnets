@@ -14,10 +14,10 @@ CREATE TABLE IF NOT EXISTS hosts (
     os             String,
     arch           String,
     kernel_version String,
-    interfaces     Array(String),
-    boot_time      DateTime,
-    registered_at  DateTime,
-    updated_at     DateTime DEFAULT now()
+    interfaces     Map(UInt32, String),
+    boot_time      DateTime('UTC'),
+    registered_at  DateTime('UTC'),
+    updated_at     DateTime('UTC') DEFAULT now()
 )
 ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY (host_id)
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS packets (
     hook_type    UInt8,
     direction    UInt8,
     if_index     UInt32,
-    received_at  DateTime DEFAULT now()
+    received_at  DateTime('UTC') DEFAULT now()
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)

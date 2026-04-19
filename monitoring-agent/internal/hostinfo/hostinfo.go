@@ -19,7 +19,7 @@ type Info struct {
 	OS            string
 	Arch          string
 	KernelVersion string
-	Interfaces    []string
+	Interfaces    map[uint32]string
 	BootTimeSec   int64
 	RegisterTS    int64
 }
@@ -47,38 +47,33 @@ func Collect(cfg *config.Config) (*Info, error) {
 		RegisterTS:    time.Now().UnixNano(),
 	}, nil
 }
-func getActiveInterfaces() []string {
+func getActiveInterfaces() map[uint32]string {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
 
-	var active []string
+	result := make(map[uint32]string)
+
 	for _, iface := range ifaces {
-		// Пропускаем loopback
 		if iface.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-
-		// Пропускаем интерфейсы без флага UP
 		if iface.Flags&net.FlagUp == 0 {
 			continue
 		}
 
-		// Проверяем наличие хотя бы одного IP-адреса
 		addrs, err := iface.Addrs()
 		if err != nil || len(addrs) == 0 {
 			continue
 		}
 
-		// Проверяем что есть хотя бы один не-link-local адрес
 		hasUsableAddr := false
 		for _, addr := range addrs {
 			ip, _, err := net.ParseCIDR(addr.String())
 			if err != nil {
 				continue
 			}
-			// Пропускаем link-local (fe80::, 169.254.x.x)
 			if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 				continue
 			}
@@ -87,11 +82,11 @@ func getActiveInterfaces() []string {
 		}
 
 		if hasUsableAddr {
-			active = append(active, iface.Name)
+			result[uint32(iface.Index)] = iface.Name
 		}
 	}
 
-	return active
+	return result
 }
 
 func resolveHostID(explicit, file string) (string, error) {

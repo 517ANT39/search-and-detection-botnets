@@ -12,7 +12,7 @@ type HostRecord struct {
 	OS            string
 	Arch          string
 	KernelVersion string
-	Interfaces    []string
+	Interfaces    map[uint32]string
 	BootTime      time.Time
 	RegisteredAt  time.Time
 }

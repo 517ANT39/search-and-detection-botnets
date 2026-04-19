@@ -4,8 +4,6 @@ package traffic;
 
 option go_package = "traffic-agent/gen/traffic";
 
-/* ── Enums ──────────────────────────────────────────────── */
-
 enum HookType {
     HOOK_TC         = 0;
     HOOK_XDP        = 1;
@@ -17,25 +15,21 @@ enum Direction {
     EGRESS  = 1;
 }
 
-/* ── Host registration ──────────────────────────────────── */
-
 message HostInfo {
-    string host_id        = 1;
-    string hostname       = 2;
-    string os             = 3;
-    string arch           = 4;
-    string kernel_version = 5;
-    repeated string interfaces = 6;
-    int64  boot_time_sec  = 7;
-    int64  register_ts    = 8;
+    string host_id                    = 1;
+    string hostname                   = 2;
+    string os                         = 3;
+    string arch                       = 4;
+    string kernel_version             = 5;
+    map<uint32, string> interfaces    = 6;  // ifindex → name
+    int64  boot_time_sec              = 7;
+    int64  register_ts                = 8;
 }
 
 message RegisterResponse {
     bool   ok      = 1;
     string message = 2;
 }
-
-/* ── Packet events ──────────────────────────────────────── */
 
 message PacketEvent {
     uint64    timestamp_ns = 1;
@@ -60,8 +54,6 @@ message BatchResponse {
     bool   ok             = 1;
     uint64 received_count = 2;
 }
-
-/* ── Service ────────────────────────────────────────────── */
 
 service TrafficCollector {
     rpc RegisterHost    (HostInfo)    returns (RegisterResponse);

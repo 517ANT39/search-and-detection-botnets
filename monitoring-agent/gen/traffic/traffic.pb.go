@@ -123,7 +123,7 @@ type HostInfo struct {
 	Os            string                 `protobuf:"bytes,3,opt,name=os,proto3" json:"os,omitempty"`
 	Arch          string                 `protobuf:"bytes,4,opt,name=arch,proto3" json:"arch,omitempty"`
 	KernelVersion string                 `protobuf:"bytes,5,opt,name=kernel_version,json=kernelVersion,proto3" json:"kernel_version,omitempty"`
-	Interfaces    []string               `protobuf:"bytes,6,rep,name=interfaces,proto3" json:"interfaces,omitempty"`
+	Interfaces    map[uint32]string      `protobuf:"bytes,6,rep,name=interfaces,proto3" json:"interfaces,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // ifindex → name
 	BootTimeSec   int64                  `protobuf:"varint,7,opt,name=boot_time_sec,json=bootTimeSec,proto3" json:"boot_time_sec,omitempty"`
 	RegisterTs    int64                  `protobuf:"varint,8,opt,name=register_ts,json=registerTs,proto3" json:"register_ts,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -195,7 +195,7 @@ func (x *HostInfo) GetKernelVersion() string {
 	return ""
 }
 
-func (x *HostInfo) GetInterfaces() []string {
+func (x *HostInfo) GetInterfaces() map[uint32]string {
 	if x != nil {
 		return x.Interfaces
 	}
@@ -500,19 +500,22 @@ var File_traffic_proto protoreflect.FileDescriptor
 
 const file_traffic_proto_rawDesc = "" +
 	"\n" +
-	"\rtraffic.proto\x12\atraffic\"\xef\x01\n" +
+	"\rtraffic.proto\x12\atraffic\"\xd1\x02\n" +
 	"\bHostInfo\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x0e\n" +
 	"\x02os\x18\x03 \x01(\tR\x02os\x12\x12\n" +
 	"\x04arch\x18\x04 \x01(\tR\x04arch\x12%\n" +
-	"\x0ekernel_version\x18\x05 \x01(\tR\rkernelVersion\x12\x1e\n" +
+	"\x0ekernel_version\x18\x05 \x01(\tR\rkernelVersion\x12A\n" +
 	"\n" +
-	"interfaces\x18\x06 \x03(\tR\n" +
+	"interfaces\x18\x06 \x03(\v2!.traffic.HostInfo.InterfacesEntryR\n" +
 	"interfaces\x12\"\n" +
 	"\rboot_time_sec\x18\a \x01(\x03R\vbootTimeSec\x12\x1f\n" +
 	"\vregister_ts\x18\b \x01(\x03R\n" +
-	"registerTs\"<\n" +
+	"registerTs\x1a=\n" +
+	"\x0fInterfacesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"<\n" +
 	"\x10RegisterResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\xbc\x02\n" +
@@ -560,7 +563,7 @@ func file_traffic_proto_rawDescGZIP() []byte {
 }
 
 var file_traffic_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_traffic_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_traffic_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_traffic_proto_goTypes = []any{
 	(HookType)(0),            // 0: traffic.HookType
 	(Direction)(0),           // 1: traffic.Direction
@@ -569,20 +572,22 @@ var file_traffic_proto_goTypes = []any{
 	(*PacketEvent)(nil),      // 4: traffic.PacketEvent
 	(*PacketBatch)(nil),      // 5: traffic.PacketBatch
 	(*BatchResponse)(nil),    // 6: traffic.BatchResponse
+	nil,                      // 7: traffic.HostInfo.InterfacesEntry
 }
 var file_traffic_proto_depIdxs = []int32{
-	0, // 0: traffic.PacketEvent.hook:type_name -> traffic.HookType
-	1, // 1: traffic.PacketEvent.direction:type_name -> traffic.Direction
-	4, // 2: traffic.PacketBatch.events:type_name -> traffic.PacketEvent
-	2, // 3: traffic.TrafficCollector.RegisterHost:input_type -> traffic.HostInfo
-	5, // 4: traffic.TrafficCollector.SendPacketBatch:input_type -> traffic.PacketBatch
-	3, // 5: traffic.TrafficCollector.RegisterHost:output_type -> traffic.RegisterResponse
-	6, // 6: traffic.TrafficCollector.SendPacketBatch:output_type -> traffic.BatchResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	7, // 0: traffic.HostInfo.interfaces:type_name -> traffic.HostInfo.InterfacesEntry
+	0, // 1: traffic.PacketEvent.hook:type_name -> traffic.HookType
+	1, // 2: traffic.PacketEvent.direction:type_name -> traffic.Direction
+	4, // 3: traffic.PacketBatch.events:type_name -> traffic.PacketEvent
+	2, // 4: traffic.TrafficCollector.RegisterHost:input_type -> traffic.HostInfo
+	5, // 5: traffic.TrafficCollector.SendPacketBatch:input_type -> traffic.PacketBatch
+	3, // 6: traffic.TrafficCollector.RegisterHost:output_type -> traffic.RegisterResponse
+	6, // 7: traffic.TrafficCollector.SendPacketBatch:output_type -> traffic.BatchResponse
+	6, // [6:8] is the sub-list for method output_type
+	4, // [4:6] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_traffic_proto_init() }
@@ -596,7 +601,7 @@ func file_traffic_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_traffic_proto_rawDesc), len(file_traffic_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

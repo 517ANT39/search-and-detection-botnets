@@ -2,27 +2,29 @@ package grpcserver
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
-	"time"
 
 	"google.golang.org/grpc"
 
 	pb "traffic-collector/gen/traffic"
-	"traffic-collector/internal/models"
-	"traffic-collector/internal/store"
 )
+
+// Publisher — абстракция над Kafka-продюсером.
+type Publisher interface {
+	PublishHost(ctx context.Context, info *pb.HostInfo) error
+	PublishBatch(ctx context.Context, batch *pb.PacketBatch) error
+}
 
 type Server struct {
 	pb.UnimplementedTrafficCollectorServer
-	store  *store.Store
+	pub    Publisher
 	logger *slog.Logger
 }
 
-func New(st *store.Store, logger *slog.Logger) *Server {
-	return &Server{store: st, logger: logger}
+func New(pub Publisher, logger *slog.Logger) *Server {
+	return &Server{pub: pub, logger: logger}
 }
 
 // ── RegisterHost ───────────────────────────────────────────
@@ -35,22 +37,11 @@ func (s *Server) RegisterHost(ctx context.Context, info *pb.HostInfo) (*pb.Regis
 		"interfaces", info.Interfaces,
 	)
 
-	rec := &models.HostRecord{
-		HostID:        info.HostId,
-		Hostname:      info.Hostname,
-		OS:            info.Os,
-		Arch:          info.Arch,
-		KernelVersion: info.KernelVersion,
-		Interfaces:    info.Interfaces,
-		BootTime:      time.Unix(info.BootTimeSec, 0),
-		RegisteredAt:  time.Unix(0, info.RegisterTs),
-	}
-
-	if err := s.store.InsertHost(ctx, rec); err != nil {
-		s.logger.Error("insert host", "err", err)
+	if err := s.pub.PublishHost(ctx, info); err != nil {
+		s.logger.Error("publish host", "err", err)
 		return &pb.RegisterResponse{
 			Ok:      false,
-			Message: fmt.Sprintf("store error: %v", err),
+			Message: fmt.Sprintf("publish error: %v", err),
 		}, nil
 	}
 
@@ -62,8 +53,7 @@ func (s *Server) RegisterHost(ctx context.Context, info *pb.HostInfo) (*pb.Regis
 
 // ── SendPacketBatch ────────────────────────────────────────
 
-func (s *Server) SendPacketBatch(_ context.Context, batch *pb.PacketBatch) (*pb.BatchResponse, error) {
-	now := time.Now()
+func (s *Server) SendPacketBatch(ctx context.Context, batch *pb.PacketBatch) (*pb.BatchResponse, error) {
 	count := len(batch.Events)
 
 	s.logger.Debug("batch received",
@@ -71,38 +61,15 @@ func (s *Server) SendPacketBatch(_ context.Context, batch *pb.PacketBatch) (*pb.
 		"count", count,
 	)
 
-	records := make([]models.PacketRecord, 0, count)
-	for _, evt := range batch.Events {
-		records = append(records, models.PacketRecord{
-			Timestamp:  time.Unix(0, int64(evt.TimestampNs)),
-			HostID:     batch.HostId,
-			SrcIP:      uint32ToIP(evt.SrcIp),
-			DstIP:      uint32ToIP(evt.DstIp),
-			SrcPort:    uint16(evt.SrcPort),
-			DstPort:    uint16(evt.DstPort),
-			PktLen:     evt.PktLen,
-			Protocol:   uint8(evt.Protocol),
-			HookType:   uint8(evt.Hook),
-			Direction:  uint8(evt.Direction),
-			IfIndex:    evt.Ifindex,
-			ReceivedAt: now,
-		})
+	if err := s.pub.PublishBatch(ctx, batch); err != nil {
+		s.logger.Error("publish batch", "err", err, "host_id", batch.HostId)
+		return &pb.BatchResponse{Ok: false, ReceivedCount: 0}, nil
 	}
-
-	// Async enqueue — неблокирующая запись
-	s.store.Enqueue(records)
 
 	return &pb.BatchResponse{
 		Ok:            true,
 		ReceivedCount: uint64(count),
 	}, nil
-}
-
-// uint32 (little-endian from eBPF) → net.IP
-func uint32ToIP(v uint32) net.IP {
-	ip := make(net.IP, 4)
-	binary.LittleEndian.PutUint32(ip, v)
-	return ip
 }
 
 // ── Start gRPC listener ────────────────────────────────────

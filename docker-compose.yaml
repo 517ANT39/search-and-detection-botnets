@@ -9,12 +9,61 @@ services:
       CLICKHOUSE_DB: traffic
       CLICKHOUSE_USER: traffic
       CLICKHOUSE_PASSWORD: traffic_pass
-    
+
   postgres:
     image: postgres:16-alpine
     environment:
-        POSTGRES_DB: traffic_analyzer
-        POSTGRES_USER: analyzer
-        POSTGRES_PASSWORD: analyzer_pass
+      POSTGRES_DB: traffic_analyzer
+      POSTGRES_USER: analyzer
+      POSTGRES_PASSWORD: analyzer_pass
     ports:
-        - "5432:5432"
+      - "5432:5432"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.0.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.0.1
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"    # внешний listener (с хоста)
+      - "9094:9094"    # внутренний listener (между контейнерами)
+    environment:
+      # ── ZooKeeper ──
+      KAFKA_BROKER_ID: 0
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      # ── Listeners ──
+      KAFKA_LISTENERS: "PLAINTEXT://:9094,EXTERNAL://:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9094,EXTERNAL://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # ── Топики ──
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # ── Размер сообщения (батч пакетов может быть крупным) ──
+      KAFKA_MESSAGE_MAX_BYTES: 20971520          # 20 MiB
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 20971520
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "local"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:9094"

@@ -17,7 +17,7 @@ proto:
 		--proto_path=$(PROTO_DIR) \
 		--go_out=./gen/traffic --go_opt=paths=source_relative \
 		--go-grpc_out=./gen/traffic --go-grpc_opt=paths=source_relative \
-		$(PROTO_DIR)/traffic.proto
+		$(PROTO_DIR)/*.proto
 
 build:
 	@echo ">>> Building collector…"

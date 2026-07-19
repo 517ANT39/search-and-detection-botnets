@@ -111,19 +111,16 @@ func (p *Producer) PublishHost(ctx context.Context, info *pb.HostInfo) error {
 
 // PublishBatch публикует весь PacketBatch одним protobuf-сообщением.
 // Ключ = host_id → все батчи одного хоста идут в одну партицию (порядок сохраняется).
-func (p *Producer) PublishBatch(ctx context.Context, batch *pb.PacketBatch) error {
-	if len(batch.Events) == 0 {
-		return nil
-	}
+func (p *Producer) PublishPacket(ctx context.Context, packet *pb.PacketInfo) error {
 
-	payload, err := proto.Marshal(batch)
+	payload, err := proto.Marshal(packet)
 	if err != nil {
 		return fmt.Errorf("marshal PacketBatch: %w", err)
 	}
 
 	msg := kafka.Message{
 		Topic: p.packetsTopic,
-		Key:   []byte(batch.HostId),
+		Key:   []byte(packet.HostId),
 		Value: payload,
 	}
 

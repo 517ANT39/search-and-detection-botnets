@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package traffic;
+
+import "common.proto";
+
+option go_package = "traffic-agent/gen/traffic";
+
+message PacketInfo {
+    uint64    timestamp_ns = 1;
+    string   src_ip       = 2;
+    string   dst_ip       = 3;
+    uint32    src_port     = 4;
+    uint32    dst_port     = 5;
+    uint32    pkt_len      = 6;
+    Protocol    protocol     = 7;
+    HookType  hook         = 8;
+    Direction direction    = 9;
+    uint32    ifindex      = 10;
+    string host_id         = 11;
+}
+

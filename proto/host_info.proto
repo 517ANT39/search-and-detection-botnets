@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package traffic;
+
+option go_package = "traffic-agent/gen/traffic";
+
+message HostInfo {
+    string host_id                    = 1;
+    string hostname                   = 2;
+    string os                         = 3;
+    string arch                       = 4;
+    string kernel_version             = 5;
+    map<uint32, string> interfaces    = 6;  // ifindex → name
+    int64  boot_time_sec              = 7;
+    int64  register_ts                = 8;
+}

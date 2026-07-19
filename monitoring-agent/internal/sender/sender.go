@@ -14,6 +14,7 @@ import (
 	"monitoring-agent/internal/bpfprog"
 	"monitoring-agent/internal/config"
 	"monitoring-agent/internal/hostinfo"
+	"monitoring-agent/internal/utils"
 )
 
 type Sender struct {
@@ -140,7 +141,7 @@ func toPB(e *bpfprog.RealPacketEvent) *pb.PacketEvent {
 		SrcPort:     uint32(e.SrcPort),
 		DstPort:     uint32(e.DstPort),
 		PktLen:      e.PktLen,
-		Protocol:    uint32(e.Protocol),
+		Protocol:    utils.DecodeProtocol(e.Protocol),
 		Hook:        pb.HookType(e.HookType),
 		Direction:   pb.Direction(e.Direction),
 		Ifindex:     e.Ifindex,

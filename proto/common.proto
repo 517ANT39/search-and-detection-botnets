@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package traffic;
+
+option go_package = "traffic-agent/gen/traffic";
+
+enum HookType {
+    HOOK_TC         = 0;
+    HOOK_XDP        = 1;
+    HOOK_CGROUP_SKB = 2;
+}
+
+enum Direction {
+    INGRESS = 0;
+    EGRESS  = 1;
+}
+
+enum Protocol {
+    IPPROTO_TCP =  0;
+    IPPROTO_UDP = 1;
+    IPPROTO_ICMP = 2;
+    UNKNOWN = 3;
+}
+

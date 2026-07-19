@@ -9,12 +9,13 @@ import (
 	"google.golang.org/grpc"
 
 	pb "traffic-collector/gen/traffic"
+	"traffic-collector/internal/utils"
 )
 
 // Publisher — абстракция над Kafka-продюсером.
 type Publisher interface {
 	PublishHost(ctx context.Context, info *pb.HostInfo) error
-	PublishBatch(ctx context.Context, batch *pb.PacketBatch) error
+	PublishPacket(ctx context.Context, batch *pb.PacketInfo) error
 }
 
 type Server struct {
@@ -61,9 +62,11 @@ func (s *Server) SendPacketBatch(ctx context.Context, batch *pb.PacketBatch) (*p
 		"count", count,
 	)
 
-	if err := s.pub.PublishBatch(ctx, batch); err != nil {
-		s.logger.Error("publish batch", "err", err, "host_id", batch.HostId)
-		return &pb.BatchResponse{Ok: false, ReceivedCount: 0}, nil
+	for _, packet := range batch.Events {
+		packetInfo := utils.ToPacketInfo(packet)
+		if err := s.pub.PublishPacket(ctx, packetInfo); err != nil {
+			s.logger.Error("publish batch", "err", err, "host_id", batch.HostId)
+		}
 	}
 
 	return &pb.BatchResponse{

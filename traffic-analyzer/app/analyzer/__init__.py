@@ -1,1 +1,0 @@
-import app.analyzer.detectors

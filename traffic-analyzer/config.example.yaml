@@ -1,34 +1,45 @@
-app:
-  secret_key: "change-me-super-secret-key-here"
-  debug: true
+kafka:
+  brokers:
+    - "127.0.0.1:9092"
+  group_id: "traffic-analyzer"
+  packets_topic: "traffic.packets"
+  hosts_topic: "traffic.hosts"
+  alerts_topic: "traffic.alerts"
+  profiles_topic: "traffic.profiles"
+  poll_timeout: 1.0
+  auto_offset_reset: "latest"
 
-postgres:
-  uri: "postgresql://analyzer:analyzer_pass@localhost:5432/traffic_analyzer"
-
-clickhouse:
-  host: "localhost"
-  port: 9000
-  database: "traffic"
-  username: "traffic"
-  password: "traffic_pass"
-
-mail:
-  server: "smtp.example.com"
-  port: 587
-  use_tls: true
-  username: "alerts@example.com"
-  password: "mail_pass"
-  default_sender: "Traffic Analyzer <alerts@example.com>"
+windows:
+  tumbling_sec: 60
+  sliding_sec: 300
+  sliding_step_sec: 60
+  session_timeout_sec: 120
+  watermark_sec: 30
 
 analyzer:
-  # Расписание анализа (cron)
-  schedule_minutes: 5
-  # IsolationForest параметры по умолчанию
-  contamination: 0.05
-  n_estimators: 200
-  # Окно анализа
-  window_minutes: 10
-  # Минимум пакетов для анализа
-  min_samples: 100
+  detectors:
+    - rule
+    - isoforest
+  ml_core: "isoforest"
+  rule_weight: 0.6
+  ml_weight: 0.4
+  thresholds:
+    pps: 10000.0
+    bps: 100000000.0
+    uniq_dst_port_scan: 100
+    uniq_dst_ip_scan: 100
+    beacon_std_max: 0.5
+    beacon_min_conns: 5
 
+clickhouse:          # только чтение (train / second_pass)
+  host: "127.0.0.1"
+  port: 8123
+  database: "traffic"
+  user: "traffic"
+  password: "traffic_pass"
 
+model:
+  path: "models/isoforest.joblib"
+  version: "v1"
+
+log_level: "INFO"

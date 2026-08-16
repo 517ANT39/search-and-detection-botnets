@@ -1,92 +1,75 @@
 services:
-  clickhouse-traffic:
-    image: clickhouse/clickhouse-server:24.8-alpine
-    container_name: clickhouse-traffic
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "9000:9000"
-      - "8123:8123"
-    environment:
-      CLICKHOUSE_DB: traffic
-      CLICKHOUSE_USER: traffic
-      CLICKHOUSE_PASSWORD: traffic_pass
-    volumes:
-      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
-      - clickhouse_/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: traffic_analyzer
-      POSTGRES_USER: analyzer
-      POSTGRES_PASSWORD: analyzer_pass
-    ports:
-      - "5432:5432"
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.0.1
+    image: confluentinc/cp-zookeeper:7.6.1    
     container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
 
   kafka:
-    image: confluentinc/cp-kafka:7.0.1
-    container_name: kafka
+    image: confluentinc/cp-kafka:7.6.1
     depends_on:
       - zookeeper
-    ports:
-      - "9092:9092"
-      - "9094:9094"
+    container_name: kafka
     environment:
-      KAFKA_BROKER_ID: 0
-      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
-      KAFKA_LISTENERS: "PLAINTEXT://:9094,EXTERNAL://:9092"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9094,EXTERNAL://localhost:9092"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT"
-      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_NUM_PARTITIONS: 6
-      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_MESSAGE_MAX_BYTES: 20971520
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 20971520
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9094"]
-      interval: 10s
-      timeout: 5s
-      retries: 15
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "29092:29092"  # доступ снаружи (для ваших агентов на хост-машине)
+
+  clickhouse:
+    container_name: clickhouse
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_DB: netsentry
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: pass
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ports:
+      - 8123:8123
+
+  db_app:
+    image: postgres:16-alpine
+    container_name: db_app
+    environment:
+      POSTGRES_USER: netsentry
+      POSTGRES_PASSWORD: netsentry
+      POSTGRES_DB: netsentry
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   analyzer:
     build:
-      context: ./traffic-analyzer     # каталог с Dockerfile анализатора
-      dockerfile: Dockerfile
-    container_name: analyzer
+      context: ./traffic-analyzer
     depends_on:
-      kafka:
-        condition: service_healthy
-      clickhouse-traffic:
-        condition: service_healthy
+      - kafka
+      - clickhouse
     environment:
-      ANALYZER_KAFKA_BROKERS: "kafka:9094"     # внутренний listener
-      ANALYZER_KAFKA_GROUP: "traffic-analyzer"
-      ANALYZER_CH_HOST: "clickhouse-traffic"   # для train/second_pass (чтение)
-      ANALYZER_CH_PASSWORD: "traffic_pass"
-      ANALYZER_LOG_LEVEL: "INFO"
-    volumes:
-      # том для сохранения обученных ML-моделей между перезапусками
-      - analyzer_models:/app/models
+      KAFKA_BOOTSTRAP: kafka:9092
+      CLICKHOUSE_URL: jdbc:clickhouse://clickhouse:8123/netsentry
+    restart: unless-stopped
+
+  # Единый контейнер frontend (nginx) + backend (uvicorn), как в корневом Dockerfile
+  app:
+    build:
+      context: ./app-service
+    depends_on:
+      - kafka
+      - clickhouse
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      CLICKHOUSE_HOST: clickhouse
+    ports:
+      - "8080:8000"
     restart: unless-stopped
 
 volumes:
-  clickhouse_:
-  analyzer_models:
+  clickhouse_data:
+  postgres_data:

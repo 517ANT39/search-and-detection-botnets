@@ -1,12 +1,111 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NetSentry — Анализ сетевой активности</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Anomaly Dashboard</title>
+</head>
+<body>
+    <!-- Страница логина -->
+    <div id="login-page">
+        <h2>Вход</h2>
+        <form id="login-form">
+            <input type="text" id="username" placeholder="Имя пользователя" required>
+            <input type="password" id="password" placeholder="Пароль" required>
+            <button type="submit">Войти</button>
+        </form>
+        <p><a href="#" id="register-link">Зарегистрироваться</a></p>
+    </div>
+
+    <!-- Основное приложение -->
+    <div id="app">
+        <div class="container">
+            <div class="header">
+                <h1>🚦 Traffic Anomaly Dashboard</h1>
+                <div>
+                    <span id="user-info" class="user-info"></span>
+                    <button id="logout-btn" class="logout-btn">Выйти</button>
+                </div>
+            </div>
+
+            <!-- Фильтры -->
+            <div class="filters">
+                <input type="datetime-local" id="start-time" placeholder="Начало" />
+                <input type="datetime-local" id="end-time" placeholder="Конец" />
+                <input type="text" id="src-ip" placeholder="Src IP" />
+                <input type="text" id="dst-ip" placeholder="Dst IP" />
+                <input type="text" id="host-ip" placeholder="Host IP" />
+                <select id="protocol">
+                    <option value="">Any Protocol</option>
+                    <option value="0">TCP</option>
+                    <option value="1">UDP</option>
+                    <option value="2">ICMP</option>
+                    <option value="3">UNKNOWN</option>
+                </select>
+                <select id="direction">
+                    <option value="">Any Direction</option>
+                    <option value="0">Ingress</option>
+                    <option value="1">Egress</option>
+                </select>
+                <select id="anomaly-type">
+                    <option value="">Any Anomaly</option>
+                    <option value="volume_spike">Volume Spike</option>
+                </select>
+                <input type="number" id="min-packets" placeholder="Min packets" value="10" style="width:120px;" />
+                <button onclick="applyFilters()">Apply</button>
+                <button onclick="saveFilter()">Save Filter</button>
+                <select id="filter-select" class="filter-select" onchange="loadFilter(this.value)"></select>
+            </div>
+
+            <!-- Вкладки -->
+            <div class="tabs">
+                <button class="tab active" data-tab="dashboard">Dashboard</button>
+                <button class="tab" data-tab="alerts">Alerts</button>
+                <button class="tab" data-tab="hosts">Hosts</button>
+                <button class="tab" data-tab="topology">Topology</button>
+                <button class="tab" data-tab="stats">Stats</button>
+            </div>
+
+            <div id="dashboard" class="tab-content active">
+                <div class="card">
+                    <h3>Traffic Volume (last hour)</h3>
+                    <canvas id="traffic-chart"></canvas>
+                </div>
+            </div>
+
+            <div id="alerts" class="tab-content">
+                <div class="card">
+                    <h3>Real-time Alerts</h3>
+                    <div id="alert-list"></div>
+                </div>
+            </div>
+
+            <div id="hosts" class="tab-content">
+                <div class="card">
+                    <h3>Connected Hosts</h3>
+                    <table id="hosts-table">
+                        <thead><tr><th>Host ID</th><th>Hostname</th><th>OS</th><th>Arch</th><th>Boot Time</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="topology" class="tab-content">
+                <div class="card">
+                    <h3>Network Topology</h3>
+                    <div id="topology-graph"></div>
+                </div>
+            </div>
+
+            <div id="stats" class="tab-content">
+                <div class="card">
+                    <h3>Protocol & Port Statistics</h3>
+                    <div id="stats-content">(тут будут графики/таблицы)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
 </html>

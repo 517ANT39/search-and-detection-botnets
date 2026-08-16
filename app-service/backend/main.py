@@ -1,490 +1,225 @@
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.security import OAuth2PasswordRequestForm
 import asyncio
 import json
-import random
-from datetime import datetime, timedelta
-from typing import List, Optional
+import os
+import logging
+from datetime import datetime
+from sqlalchemy.orm import Session
+from .auth import authenticate_user, create_access_token, get_current_user, get_password_hash
+from .db import db, get_postgres_session
+from .schemas import User, UserFilter
+from .models import FilterCreate, FilterOut, AlertOut, TrafficPoint, TopologyLink, HostInfo
+from .consumers import consume_alerts, consume_host_info
+from .utils import manager
+from .config import DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from jose import jwt, JWTError
+app = FastAPI()
 
-from data.mock_data import (
-    SUMMARY, CHANNEL_USAGE, PROTOCOLS, NODES, INCIDENTS, EVENTS,
-    NOTIFICATIONS, RULES, REPORTS, SETTINGS, USERS_DB,
-    traffic_history, node_load_heatmap, node_load_buckets,
-    traffic_history_for_node, traffic_by_node, now_iso,
-)
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 
-SECRET_KEY = "dev-secret-change-me"
-ALGORITHM = "HS256"
+# ---- Инициализация администратора ----
+def init_admin(db: Session):
+    admin = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
+    if not admin:
+        hashed = get_password_hash(DEFAULT_ADMIN_PASSWORD)
+        admin = User(username=DEFAULT_ADMIN_USERNAME, hashed_password=hashed)
+        db.add(admin)
+        db.commit()
+        logger.info(f"Admin user '{DEFAULT_ADMIN_USERNAME}' created with default password.")
 
-app = FastAPI(title="NetSentry Mock API")
+# ---- API маршруты (выше catch-all) ----
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # на проде укажите конкретный домен фронта
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.post("/api/register")
+async def register(username: str, password: str, db_session: Session = Depends(get_postgres_session)):
+    existing = db_session.query(User).filter(User.username == username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    hashed = get_password_hash(password)
+    user = User(username=username, hashed_password=hashed)
+    db_session.add(user)
+    db_session.commit()
+    return {"msg": "User created"}
 
-# =====================================================================
-#  ВАЖНО: все пути ниже полностью соответствуют src/api/endpoints.js
-#  на фронтенде (HTTP_ENDPOINTS). Если меняете пути на фронте — меняйте
-#  и здесь, чтобы контракт не расходился.
-# =====================================================================
+@app.post("/api/token")
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db_session: Session = Depends(get_postgres_session)):
+    user = authenticate_user(db_session, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+    token = create_access_token(data={"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
 
+@app.get("/api/me")
+async def get_me(current_user: User = Depends(get_current_user)):
+    return {"username": current_user.username}
 
-# ---------------------------- AUTH ----------------------------------
+# Фильтры пользователя
+@app.post("/api/filters", response_model=FilterOut)
+async def save_filter(filter_data: FilterCreate, current_user: User = Depends(get_current_user),
+                      db_session: Session = Depends(get_postgres_session)):
+    new_filter = UserFilter(
+        user_id=current_user.id,
+        name=filter_data.name,
+        filter_data=filter_data.filter_data
+    )
+    db_session.add(new_filter)
+    db_session.commit()
+    db_session.refresh(new_filter)
+    return FilterOut(id=new_filter.id, name=new_filter.name,
+                     filter_data=new_filter.filter_data,
+                     created_at=new_filter.created_at.isoformat())
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+@app.get("/api/filters", response_model=list[FilterOut])
+async def get_filters(current_user: User = Depends(get_current_user),
+                      db_session: Session = Depends(get_postgres_session)):
+    filters = db_session.query(UserFilter).filter(UserFilter.user_id == current_user.id).all()
+    return [FilterOut(id=f.id, name=f.name, filter_data=f.filter_data,
+                      created_at=f.created_at.isoformat()) for f in filters]
 
+@app.delete("/api/filters/{filter_id}")
+async def delete_filter(filter_id: int, current_user: User = Depends(get_current_user),
+                        db_session: Session = Depends(get_postgres_session)):
+    f = db_session.query(UserFilter).filter(UserFilter.id == filter_id, UserFilter.user_id == current_user.id).first()
+    if not f:
+        raise HTTPException(status_code=404, detail="Filter not found")
+    db_session.delete(f)
+    db_session.commit()
+    return {"msg": "deleted"}
 
-def create_token(username: str) -> str:
-    payload = {"sub": username, "exp": datetime.utcnow() + timedelta(hours=8)}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+# Эндпоинты с фильтрацией
+@app.get("/api/traffic", response_model=list[TrafficPoint])
+async def get_traffic(
+    start_time: str = None,
+    end_time: str = None,
+    src_ip: str = None,
+    dst_ip: str = None,
+    protocol: int = None,
+    direction: int = None,
+    host_ip: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    rows = await db.fetch_traffic_stats_filtered(start_time, end_time, src_ip, dst_ip, protocol, direction, host_ip)
+    return [{"timestamp": row[0].isoformat(), "packets": row[1], "bytes": row[2]} for row in rows]
 
+@app.get("/api/topology", response_model=list[TopologyLink])
+async def get_topology(
+    start_time: str = None,
+    end_time: str = None,
+    src_ip: str = None,
+    dst_ip: str = None,
+    protocol: int = None,
+    direction: int = None,
+    min_packets: int = 10,
+    current_user: User = Depends(get_current_user)
+):
+    rows = await db.fetch_topology_filtered(start_time, end_time, src_ip, dst_ip, protocol, direction, min_packets)
+    return [{"src": row[0], "dst": row[1], "packets": row[2], "bytes": row[3]} for row in rows]
 
-def get_current_user(authorization: Optional[str] = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Не авторизован")
-    token = authorization.split(" ")[1]
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = payload.get("sub")
-        if username not in USERS_DB:
-            raise HTTPException(status_code=401, detail="Пользователь не найден")
-        return username
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Токен недействителен")
-
-
-def user_public(username: str) -> dict:
-    u = USERS_DB[username]
-    return {"username": username, "name": u["name"], "role": u["role"], "email": u["email"]}
-
-
-@app.post("/api/auth/login")
-def login(payload: LoginRequest):
-    user = USERS_DB.get(payload.username)
-    if not user or user["password"] != payload.password:
-        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
-    token = create_token(payload.username)
-    return {"token": token, "user": user_public(payload.username)}
-
-
-@app.get("/api/auth/me")
-def me(user: str = Depends(get_current_user)):
-    return user_public(user)
-
-
-@app.post("/api/auth/logout")
-def logout(user: str = Depends(get_current_user)):
-    return {"status": "ok"}
-
-
-@app.post("/api/auth/refresh")
-def refresh_token(user: str = Depends(get_current_user)):
-    return {"token": create_token(user)}
-
-
-class ProfileUpdateRequest(BaseModel):
-    email: Optional[str] = None
-    newUsername: Optional[str] = None
-    newPassword: Optional[str] = None
-    currentPassword: Optional[str] = None
-
-
-@app.patch("/api/auth/profile")
-def update_profile(payload: ProfileUpdateRequest, user: str = Depends(get_current_user)):
-    record = USERS_DB[user]
-
-    if payload.newPassword or payload.newUsername:
-        if not payload.currentPassword or payload.currentPassword != record["password"]:
-            raise HTTPException(status_code=400, detail="Неверный текущий пароль")
-
-    if payload.email:
-        record["email"] = payload.email
-
-    if payload.newPassword:
-        record["password"] = payload.newPassword
-
-    new_username = user
-    if payload.newUsername and payload.newUsername != user:
-        if payload.newUsername in USERS_DB:
-            raise HTTPException(status_code=409, detail="Такой логин уже занят")
-        USERS_DB[payload.newUsername] = record
-        del USERS_DB[user]
-        new_username = payload.newUsername
-
-    token = create_token(new_username)
-    return {"token": token, "user": user_public(new_username)}
-
-
-# ---------------------------- OVERVIEW -------------------------------
-
-@app.get("/api/overview/summary")
-def overview_summary(user: str = Depends(get_current_user)):
-    # немного «оживляем» метрики при каждом запросе, чтобы было видно обновление
-    live = dict(SUMMARY)
-    live["activeNodes"] = {
-        "active": random.randint(120, 135),
-        "total": SUMMARY["activeNodes"]["total"],
-        "percent": SUMMARY["activeNodes"]["percent"],
-    }
-    return live
-
-
-@app.get("/api/overview/traffic-history")
-def overview_traffic_history(user: str = Depends(get_current_user)):
-    return traffic_history()
-
-
-@app.get("/api/overview/channel-usage")
-def overview_channel_usage(user: str = Depends(get_current_user)):
-    return CHANNEL_USAGE
-
-
-@app.get("/api/overview/node-load")
-def overview_node_load(user: str = Depends(get_current_user)):
-    return node_load_buckets()
-
-
-@app.get("/api/overview/traffic-by-node")
-def overview_traffic_by_node(user: str = Depends(get_current_user)):
-    return traffic_by_node()
-
-
-@app.get("/api/overview/protocols")
-def overview_protocols(user: str = Depends(get_current_user)):
-    return PROTOCOLS
-
-
-@app.get("/api/overview/topology")
-def overview_topology(user: str = Depends(get_current_user)):
-    return {"nodes": NODES}
-
-
-@app.get("/api/overview/events/recent")
-def overview_recent_events(user: str = Depends(get_current_user)):
-    return EVENTS[:10]
-
-
-@app.get("/api/overview/incidents")
-def overview_incidents(user: str = Depends(get_current_user)):
-    return INCIDENTS
-
-
-# ---------------------------- TOPOLOGY -------------------------------
-
-@app.get("/api/topology/graph")
-def topology_graph(user: str = Depends(get_current_user)):
-    return {"nodes": NODES}
-
-
-# ---------------------------- NODES ----------------------------------
-
-@app.get("/api/nodes")
-def list_nodes(status: Optional[str] = None, group: Optional[str] = None,
-               user: str = Depends(get_current_user)):
-    result = NODES
-    if status:
-        result = [n for n in result if n["status"] == status]
-    if group:
-        result = [n for n in result if n["group"] == group]
+@app.get("/api/hosts", response_model=list[HostInfo])
+async def get_hosts(current_user: User = Depends(get_current_user)):
+    rows = await db.fetch_hosts()
+    # Преобразуем строку JSON interfaces обратно в dict
+    result = []
+    for row in rows:
+        row_dict = dict(row)
+        if isinstance(row_dict.get("interfaces"), str):
+            row_dict["interfaces"] = json.loads(row_dict["interfaces"])
+        result.append(row_dict)
     return result
 
-
-@app.get("/api/nodes/{node_id}")
-def get_node(node_id: str, user: str = Depends(get_current_user)):
-    node = next((n for n in NODES if n["id"] == node_id), None)
-    if not node:
-        raise HTTPException(status_code=404, detail="Узел не найден")
-    return node
-
-
-@app.get("/api/nodes/{node_id}/traffic")
-def get_node_traffic(node_id: str, user: str = Depends(get_current_user)):
-    node = next((n for n in NODES if n["id"] == node_id), None)
-    if not node:
-        raise HTTPException(status_code=404, detail="Узел не найден")
-    return {"nodeId": node_id, "label": node["label"], "history": traffic_history_for_node(node_id)}
-
-
-# ---------------------------- INCIDENTS -------------------------------
-
-@app.get("/api/incidents")
-def list_incidents(status: Optional[str] = None, level: Optional[str] = None,
-                    user: str = Depends(get_current_user)):
-    result = INCIDENTS
-    if status:
-        result = [i for i in result if i["status"] == status]
-    if level:
-        result = [i for i in result if i["level"] == level]
-    return result
-
-
-@app.get("/api/incidents/{incident_id}")
-def get_incident(incident_id: str, user: str = Depends(get_current_user)):
-    inc = next((i for i in INCIDENTS if i["id"] == incident_id), None)
-    if not inc:
-        raise HTTPException(status_code=404, detail="Инцидент не найден")
-    return inc
-
-
-@app.get("/api/incidents/{incident_id}/timeline")
-def get_incident_timeline(incident_id: str, user: str = Depends(get_current_user)):
-    inc = next((i for i in INCIDENTS if i["id"] == incident_id), None)
-    if not inc:
-        raise HTTPException(status_code=404, detail="Инцидент не найден")
-    return inc.get("timeline", [])
-
-
-@app.get("/api/incidents/{incident_id}/related-events")
-def get_incident_related_events(incident_id: str, user: str = Depends(get_current_user)):
-    return EVENTS[:5]
-
-
-@app.patch("/api/incidents/{incident_id}")
-@app.put("/api/incidents/{incident_id}")
-def update_incident(incident_id: str, payload: dict, user: str = Depends(get_current_user)):
-    inc = next((i for i in INCIDENTS if i["id"] == incident_id), None)
-    if not inc:
-        raise HTTPException(status_code=404, detail="Инцидент не найден")
-    inc.update(payload)
-    return inc
-
-
-# ---------------------------- EVENTS ----------------------------------
-
-@app.get("/api/events")
-def list_events(limit: int = 50, level: Optional[str] = None,
-                 user: str = Depends(get_current_user)):
-    result = EVENTS
-    if level:
-        result = [e for e in result if e["level"] == level]
-    return result[:limit]
-
-
-# ---------------------------- TRAFFIC ---------------------------------
-
-@app.get("/api/traffic/stats")
-def traffic_stats(user: str = Depends(get_current_user)):
-    return {"total": SUMMARY["totalTraffic"], "history": traffic_history()}
-
-
-@app.get("/api/traffic/channels")
-def traffic_channels(user: str = Depends(get_current_user)):
-    return CHANNEL_USAGE
-
-
-# ---------------------------- RULES -----------------------------------
-
-@app.get("/api/rules")
-def list_rules(user: str = Depends(get_current_user)):
-    return RULES
-
-
-@app.get("/api/rules/{rule_id}")
-def get_rule(rule_id: int, user: str = Depends(get_current_user)):
-    rule = next((r for r in RULES if r["id"] == rule_id), None)
-    if not rule:
-        raise HTTPException(status_code=404, detail="Правило не найдено")
-    return rule
-
-
-@app.post("/api/rules")
-def create_rule(payload: dict, user: str = Depends(get_current_user)):
-    new_id = max([r["id"] for r in RULES], default=0) + 1
-    rule = {"id": new_id, **payload}
-    RULES.append(rule)
-    return rule
-
-
-@app.put("/api/rules/{rule_id}")
-def update_rule(rule_id: int, payload: dict, user: str = Depends(get_current_user)):
-    rule = next((r for r in RULES if r["id"] == rule_id), None)
-    if not rule:
-        raise HTTPException(status_code=404, detail="Правило не найдено")
-    rule.update(payload)
-    return rule
-
-
-@app.delete("/api/rules/{rule_id}")
-def delete_rule(rule_id: int, user: str = Depends(get_current_user)):
-    global RULES
-    RULES[:] = [r for r in RULES if r["id"] != rule_id]
-    return {"status": "deleted"}
-
-
-# ---------------------------- REPORTS ----------------------------------
-
-@app.get("/api/reports")
-def list_reports(user: str = Depends(get_current_user)):
-    return REPORTS
-
-
-@app.post("/api/reports/generate")
-def generate_report(payload: dict, user: str = Depends(get_current_user)):
-    new_id = max([r["id"] for r in REPORTS], default=0) + 1
-    report = {"id": new_id, "date": datetime.utcnow().strftime("%d.%m.%Y"), **payload}
-    REPORTS.append(report)
-    return report
-
-
-@app.get("/api/reports/{report_id}/download")
-def download_report(report_id: int, user: str = Depends(get_current_user)):
-    report = next((r for r in REPORTS if r["id"] == report_id), None)
-    if not report:
-        raise HTTPException(status_code=404, detail="Отчёт не найден")
-    # Заглушка — подставьте свою генерацию файла/ссылку на файловое хранилище
-    return {"url": f"/files/reports/{report_id}.{report.get('format', 'pdf').lower()}"}
-
-
-# ---------------------------- NOTIFICATIONS -----------------------------
-
-@app.get("/api/notifications")
-def list_notifications(user: str = Depends(get_current_user)):
-    return NOTIFICATIONS
-
-
-@app.patch("/api/notifications/{notification_id}/read")
-def mark_notification_read(notification_id: int, user: str = Depends(get_current_user)):
-    n = next((x for x in NOTIFICATIONS if x["id"] == notification_id), None)
-    if not n:
-        raise HTTPException(status_code=404, detail="Уведомление не найдено")
-    n["read"] = True
-    return n
-
-
-# ---------------------------- SETTINGS ----------------------------------
-
-@app.get("/api/settings")
-def get_settings(user: str = Depends(get_current_user)):
-    return SETTINGS
-
-
-@app.put("/api/settings")
-def update_settings(payload: dict, user: str = Depends(get_current_user)):
-    SETTINGS.update(payload)
-    return SETTINGS
-
-
-@app.get("/api/settings/clusters")
-def get_clusters(user: str = Depends(get_current_user)):
-    return SETTINGS["clusters"]
-
-
-@app.get("/api/settings/users")
-def get_users(user: str = Depends(get_current_user)):
-    return [user_public(u) for u in USERS_DB.keys()]
-
-
-# ================================ WEBSOCKET =================================
-
-class ConnectionManager:
-    def __init__(self):
-        self.active: List[WebSocket] = []
-
-    async def connect(self, ws: WebSocket):
-        await ws.accept()
-        self.active.append(ws)
-
-    def disconnect(self, ws: WebSocket):
-        if ws in self.active:
-            self.active.remove(ws)
-
-    async def broadcast(self, message: dict):
-        for ws in list(self.active):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                self.disconnect(ws)
-
-
-manager = ConnectionManager()
-
-
+@app.get("/api/alerts", response_model=list[AlertOut])
+async def get_alerts(
+    start_time: str = None,
+    end_time: str = None,
+    src_ip: str = None,
+    dst_ip: str = None,
+    protocol: int = None,
+    direction: int = None,
+    anomaly_type: str = None,
+    limit: int = 100,
+    current_user: User = Depends(get_current_user)
+):
+    rows = await db.fetch_alerts_filtered(start_time, end_time, src_ip, dst_ip, protocol, direction, anomaly_type, limit)
+    return [dict(row) for row in rows]
+
+@app.get("/api/host_traffic", response_model=list[TrafficPoint])
+async def get_host_traffic(
+    host_ip: str,
+    start_time: str = None,
+    end_time: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    rows = await db.fetch_host_traffic(host_ip, start_time, end_time)
+    return [{"timestamp": row[0].isoformat(), "packets": row[1], "bytes": row[2]} for row in rows]
+
+@app.get("/api/protocol_stats")
+async def get_protocol_stats(
+    start_time: str = None,
+    end_time: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    rows = await db.fetch_protocol_stats(start_time, end_time)
+    return [{"protocol": row[0], "packets": row[1], "bytes": row[2]} for row in rows]
+
+@app.get("/api/port_stats")
+async def get_port_stats(
+    start_time: str = None,
+    end_time: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    rows = await db.fetch_port_stats(start_time, end_time)
+    return [{"port": row[0], "packets": row[1], "bytes": row[2]} for row in rows]
+
+# ---- Статика ----
+@app.get("/")
+async def root():
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "Frontend not built"}
+
+assets_path = os.path.join(STATIC_DIR, "assets")
+if os.path.exists(assets_path):
+    app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    if full_path.startswith("api/") or full_path.startswith("ws"):
+        raise HTTPException(status_code=404, detail="Not found")
+    file_path = os.path.join(STATIC_DIR, full_path)
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"message": "Frontend not built"}
+
+# ---- WebSocket ----
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
-    try:
-        if token:
-            jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError:
-        await websocket.close(code=4401)
-        return
-
+async def websocket_endpoint(websocket: WebSocket):
+    # В реальности можно проверить токен через query параметр
     await manager.connect(websocket)
     try:
         while True:
-            data = await websocket.receive_text()
-            try:
-                msg = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            if msg.get("type") == "ping":
-                await websocket.send_json({"type": "pong"})
-            # Здесь можно обрабатывать msg.get("type") == "auth" и другие
-            # служебные сообщения, которые присылает wsClient.js
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-
-# Фоновая рассылка обновлений — эмуляция real-time событий.
-# Типы сообщений (`type`) соответствуют WS_CHANNELS во фронтенде.
-async def background_broadcaster():
-    while True:
-        await asyncio.sleep(5)
-
-        # metrics.update
-        await manager.broadcast({
-            "type": "metrics.update",
-            "payload": {
-                "totalTraffic": SUMMARY["totalTraffic"],
-                "activeNodes": {
-                    "active": random.randint(120, 135),
-                    "total": SUMMARY["activeNodes"]["total"],
-                },
-                "suspiciousActivity": {"value": random.randint(15, 30)},
-                "criticalIncidents": {"value": random.randint(4, 9)},
-            },
-        })
-
-        # events.new (иногда)
-        if random.random() < 0.4:
-            new_event = {
-                "time": datetime.utcnow().strftime("%H:%M:%S"),
-                "level": random.choice(["info", "warning", "critical"]),
-                "text": random.choice([
-                    "Сетевое соединение", "Аномальный трафик",
-                    "Попытка доступа к ресурсу", "Изменение конфигурации",
-                ]),
-                "source": f"10.10.{random.randint(1,9)}.{random.randint(1,254)}",
-            }
-            EVENTS.insert(0, new_event)
-            await manager.broadcast({"type": "events.new", "payload": new_event})
-
-        # notifications.new (реже)
-        if random.random() < 0.2:
-            new_id = max([n["id"] for n in NOTIFICATIONS], default=0) + 1
-            notif = {
-                "id": new_id,
-                "level": random.choice(["warning", "critical", "info"]),
-                "text": "Новое событие безопасности требует внимания",
-                "time": datetime.utcnow().strftime("%H:%M:%S"),
-                "read": False,
-            }
-            NOTIFICATIONS.insert(0, notif)
-            await manager.broadcast({"type": "notifications.new", "payload": notif})
-
-
+# ---- Старт/остановка ----
 @app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(background_broadcaster())
+async def startup():
+    await db.connect()
+    # Создаём админа в PostgreSQL
+    pg = next(get_postgres_session())
+    init_admin(pg)
+    # Запускаем консьюмеры в фоновых задачах
+    asyncio.create_task(consume_alerts())
+    asyncio.create_task(consume_host_info())
 
-
-@app.get("/api/health")
-def health():
-    return {"status": "ok", "time": now_iso()}
+@app.on_event("shutdown")
+async def shutdown():
+    await db.close()

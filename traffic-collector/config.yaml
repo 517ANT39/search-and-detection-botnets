@@ -1,0 +1,17 @@
+grpc:
+  listen: "0.0.0.0:50051"
+  max_recv_msg_size: 16777216   # 16 MiB
+
+kafka:
+  brokers:
+    - "kafka:9092"
+  packets_topic: "traffic.packets"
+  hosts_topic: "traffic.hosts"
+  batch_size: 5000
+  batch_timeout: "1s"
+  compression: "snappy"         # none | gzip | snappy | lz4 | zstd
+  required_acks: "one"          # none | one | all
+  async: true
+  write_timeout: "10s"
+
+log_level: "info"

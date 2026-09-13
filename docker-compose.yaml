@@ -69,11 +69,21 @@ services:
     depends_on:
       - kafka
       - clickhouse
+      - db_app
     environment:
       KAFKA_BOOTSTRAP: kafka:9092
       CLICKHOUSE_HOST: clickhouse
     ports:
       - "8080:8000"
+    restart: unless-stopped
+
+  traffic-collector:
+    build:
+      context: ./traffic-collector
+    depends_on:
+      - kafka
+    ports:
+      - "50051:50051"    
     restart: unless-stopped
 
 volumes:

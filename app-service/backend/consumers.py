@@ -27,7 +27,7 @@ async def consume_alerts():
                     alert["timestamp"] = alert["window_start"]
                 await db.insert_alert(alert)
                 # await send_email_alert(alert)
-                await manager.broadcast(json.dumps(alert))
+                # await manager.broadcast(json.dumps(alert))
             except Exception as e:
                 logger.error(f"Error processing alert: {e}")
     finally:

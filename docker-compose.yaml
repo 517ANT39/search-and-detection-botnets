@@ -45,9 +45,17 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  analyzer:
+  stats-collector:
     build:
-      context: ./traffic-analyzer
+      context: ./stats-collector
+    depends_on:
+      - kafka
+      - clickhouse
+    restart: unless-stopped
+  
+  online-detector:
+    build:
+      context: ./online-detector
     depends_on:
       - kafka
       - clickhouse

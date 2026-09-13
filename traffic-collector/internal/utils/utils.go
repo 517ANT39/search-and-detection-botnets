@@ -25,8 +25,7 @@ func ToPacketInfo(packet *pb.PacketEvent) *pb.PacketInfo {
 func parseIp(rawIP uint32) net.IP {
 
 	ip := make(net.IP, 4)
-	binary.BigEndian.PutUint32(ip, rawIP)
-
+	binary.LittleEndian.PutUint32(ip, rawIP)
 	return ip
 
 }

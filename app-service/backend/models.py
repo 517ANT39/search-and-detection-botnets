@@ -1,48 +1,39 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
+from datetime import datetime
 
-class HostInfo(BaseModel):
-    host_id: str
-    hostname: str
-    os: str
-    arch: str
-    kernel_version: str
-    interfaces: Dict[int, str]
-    boot_time_sec: int
-    register_ts: int
 
-class AlertOut(BaseModel):
-    timestamp: str
-    src_ip: str
-    dst_ip: str
-    src_port: int
-    dst_port: int
-    protocol: int
-    direction: int
-    packet_count: int
-    byte_sum: int
-    threshold_count: float
-    threshold_bytes: float
-    anomaly_type: str
-    host_id: Optional[str] = ""
+class FilterData(BaseModel):
+    start_time: Optional[str] = None
+    end_time:   Optional[str] = None
+    src_ip:     Optional[str] = None
+    dst_ip:     Optional[str] = None
+    host_ip:    Optional[str] = None
+    protocol:   Optional[int] = None
+    direction:  Optional[int] = None
+    min_packets: Optional[int] = 10
+    minutes:    Optional[int] = 60
+
 
 class FilterCreate(BaseModel):
-    name: str
-    filter_data: dict
+    name: str = Field(..., min_length=1, max_length=100)
+    filter_data: FilterData
+
 
 class FilterOut(BaseModel):
     id: int
     name: str
-    filter_data: dict
-    created_at: str
+    filter_data: Dict[str, Any]
+    created_at: datetime
 
-class TrafficPoint(BaseModel):
-    timestamp: str
-    packets: int
-    bytes: int
+    class Config:
+        from_attributes = True
 
-class TopologyLink(BaseModel):
-    src: str
-    dst: str
-    packets: int
-    bytes: int
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

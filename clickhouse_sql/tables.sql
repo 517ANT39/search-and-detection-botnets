@@ -1,3 +1,4 @@
+USE netsentry;
 -- 1. Базовая
 CREATE TABLE IF NOT EXISTS traffic_stats (
     window_start   DateTime,

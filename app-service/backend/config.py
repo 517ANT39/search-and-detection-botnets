@@ -1,8 +1,7 @@
 import os
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "kafka:9092")
-ALERTS_TOPIC = os.getenv("ALERTS_TOPIC", "alerts")
-HOST_TOPIC = os.getenv("HOST_TOPIC", "traffic.hosts")
+ALERTS_TOPIC = os.getenv("ALERTS_TOPIC", "traffic.alerts")
 
 CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST", "clickhouse")
 CLICKHOUSE_PORT = int(os.getenv("CLICKHOUSE_PORT", "8123"))

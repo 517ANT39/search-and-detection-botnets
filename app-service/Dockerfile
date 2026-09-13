@@ -1,12 +1,10 @@
-# ---- Сборка фронта ----
 FROM node:18-alpine AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package.json ./
 RUN npm install
 COPY frontend/ ./
-RUN npm run build   # создаст dist/
+RUN npm run build
 
-# ---- Основной образ ----
 FROM python:3.10-slim
 WORKDIR /app
 COPY backend/requirements.txt ./

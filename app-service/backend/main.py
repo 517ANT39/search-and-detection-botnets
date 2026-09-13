@@ -1,207 +1,360 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi.security import OAuth2PasswordRequestForm
 import asyncio
-import json
 import os
 import logging
-from datetime import datetime
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import Depends
 from sqlalchemy.orm import Session
-from .auth import authenticate_user, create_access_token, get_current_user, get_password_hash
-from .db import db, get_postgres_session
-from .schemas import User, UserFilter
-from .models import FilterCreate, FilterOut, AlertOut, TrafficPoint, TopologyLink, HostInfo
-from .consumers import consume_alerts, consume_host_info
-from .utils import manager
-from .config import DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-app = FastAPI()
+from .config import DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD
+from .db import db, init_postgres, get_postgres_session, PostgresSessionLocal
+from .schemas import User, UserFilter
+from .auth import (
+    authenticate_user, create_access_token,
+    get_current_user, get_password_hash,
+)
+from .models import FilterCreate, FilterOut, UserOut, FilterData
+from .consumers import consume_alerts
+from .utils import manager
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+app = FastAPI(title="Traffic Anomaly Dashboard")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 
-# ---- Инициализация администратора ----
-def init_admin(db: Session):
-    admin = db.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
-    if not admin:
-        hashed = get_password_hash(DEFAULT_ADMIN_PASSWORD)
-        admin = User(username=DEFAULT_ADMIN_USERNAME, hashed_password=hashed)
-        db.add(admin)
-        db.commit()
-        logger.info(f"Admin user '{DEFAULT_ADMIN_USERNAME}' created with default password.")
 
-# ---- API маршруты (выше catch-all) ----
+# =====================================================================
+#  Startup / shutdown
+# =====================================================================
 
-@app.post("/api/register")
-async def register(username: str, password: str, db_session: Session = Depends(get_postgres_session)):
-    existing = db_session.query(User).filter(User.username == username).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    hashed = get_password_hash(password)
-    user = User(username=username, hashed_password=hashed)
-    db_session.add(user)
-    db_session.commit()
-    return {"msg": "User created"}
+def _ensure_admin():
+    s = PostgresSessionLocal()
+    try:
+        u = s.query(User).filter(User.username == DEFAULT_ADMIN_USERNAME).first()
+        if not u:
+            s.add(User(
+                username=DEFAULT_ADMIN_USERNAME,
+                hashed_password=get_password_hash(DEFAULT_ADMIN_PASSWORD),
+            ))
+            s.commit()
+            log.info(f"Создан админ '{DEFAULT_ADMIN_USERNAME}'")
+    finally:
+        s.close()
+
+
+@app.on_event("startup")
+async def startup():
+    init_postgres()
+    _ensure_admin()
+    await db.connect()
+    asyncio.create_task(consume_alerts())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await db.close()
+
+
+# =====================================================================
+#  Auth
+# =====================================================================
 
 @app.post("/api/token")
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db_session: Session = Depends(get_postgres_session)):
-    user = authenticate_user(db_session, form_data.username, form_data.password)
+async def login(form: OAuth2PasswordRequestForm = Depends(),
+                db_sess: Session = Depends(get_postgres_session)):
+    user = authenticate_user(db_sess, form.username, form.password)
     if not user:
-        raise HTTPException(status_code=401, detail="Incorrect username or password")
-    token = create_access_token(data={"sub": user.username})
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token({"sub": user.username})
     return {"access_token": token, "token_type": "bearer"}
 
-@app.get("/api/me")
-async def get_me(current_user: User = Depends(get_current_user)):
-    return {"username": current_user.username}
 
-# Фильтры пользователя
-@app.post("/api/filters", response_model=FilterOut)
-async def save_filter(filter_data: FilterCreate, current_user: User = Depends(get_current_user),
-                      db_session: Session = Depends(get_postgres_session)):
-    new_filter = UserFilter(
-        user_id=current_user.id,
-        name=filter_data.name,
-        filter_data=filter_data.filter_data
-    )
-    db_session.add(new_filter)
-    db_session.commit()
-    db_session.refresh(new_filter)
-    return FilterOut(id=new_filter.id, name=new_filter.name,
-                     filter_data=new_filter.filter_data,
-                     created_at=new_filter.created_at.isoformat())
+@app.get("/api/me", response_model=UserOut)
+async def me(current: User = Depends(get_current_user)):
+    return current
+
+
+@app.post("/api/register", response_model=UserOut)
+async def register(username: str, password: str,
+                   db_sess: Session = Depends(get_postgres_session)):
+    if db_sess.query(User).filter(User.username == username).first():
+        raise HTTPException(status_code=400, detail="Username already taken")
+    user = User(username=username, hashed_password=get_password_hash(password))
+    db_sess.add(user)
+    db_sess.commit()
+    db_sess.refresh(user)
+    return user
+
+
+# =====================================================================
+#  User filters (CRUD)
+# =====================================================================
 
 @app.get("/api/filters", response_model=list[FilterOut])
-async def get_filters(current_user: User = Depends(get_current_user),
-                      db_session: Session = Depends(get_postgres_session)):
-    filters = db_session.query(UserFilter).filter(UserFilter.user_id == current_user.id).all()
-    return [FilterOut(id=f.id, name=f.name, filter_data=f.filter_data,
-                      created_at=f.created_at.isoformat()) for f in filters]
+async def list_filters(current: User = Depends(get_current_user),
+                       db_sess: Session = Depends(get_postgres_session)):
+    return db_sess.query(UserFilter).filter(UserFilter.user_id == current.id).all()
 
-@app.delete("/api/filters/{filter_id}")
-async def delete_filter(filter_id: int, current_user: User = Depends(get_current_user),
-                        db_session: Session = Depends(get_postgres_session)):
-    f = db_session.query(UserFilter).filter(UserFilter.id == filter_id, UserFilter.user_id == current_user.id).first()
+
+@app.post("/api/filters", response_model=FilterOut)
+async def create_filter(body: FilterCreate,
+                        current: User = Depends(get_current_user),
+                        db_sess: Session = Depends(get_postgres_session)):
+    f = UserFilter(
+        user_id=current.id,
+        name=body.name,
+        filter_data=body.filter_data.dict(),
+    )
+    db_sess.add(f)
+    db_sess.commit()
+    db_sess.refresh(f)
+    return f
+
+
+@app.get("/api/filters/{fid}", response_model=FilterOut)
+async def get_filter(fid: int,
+                     current: User = Depends(get_current_user),
+                     db_sess: Session = Depends(get_postgres_session)):
+    f = db_sess.query(UserFilter).filter(
+        UserFilter.id == fid, UserFilter.user_id == current.id
+    ).first()
     if not f:
         raise HTTPException(status_code=404, detail="Filter not found")
-    db_session.delete(f)
-    db_session.commit()
-    return {"msg": "deleted"}
+    return f
 
-# Эндпоинты с фильтрацией
-@app.get("/api/traffic", response_model=list[TrafficPoint])
-async def get_traffic(
-    start_time: str = None,
-    end_time: str = None,
-    src_ip: str = None,
-    dst_ip: str = None,
-    protocol: int = None,
-    direction: int = None,
-    host_ip: str = None,
-    current_user: User = Depends(get_current_user)
+
+@app.put("/api/filters/{fid}", response_model=FilterOut)
+async def update_filter(fid: int, body: FilterCreate,
+                        current: User = Depends(get_current_user),
+                        db_sess: Session = Depends(get_postgres_session)):
+    f = db_sess.query(UserFilter).filter(
+        UserFilter.id == fid, UserFilter.user_id == current.id
+    ).first()
+    if not f:
+        raise HTTPException(status_code=404, detail="Filter not found")
+    f.name = body.name
+    f.filter_data = body.filter_data.dict()
+    db_sess.commit()
+    db_sess.refresh(f)
+    return f
+
+
+@app.delete("/api/filters/{fid}")
+async def delete_filter(fid: int,
+                        current: User = Depends(get_current_user),
+                        db_sess: Session = Depends(get_postgres_session)):
+    f = db_sess.query(UserFilter).filter(
+        UserFilter.id == fid, UserFilter.user_id == current.id
+    ).first()
+    if not f:
+        raise HTTPException(status_code=404, detail="Filter not found")
+    db_sess.delete(f)
+    db_sess.commit()
+    return {"status": "deleted", "id": fid}
+
+
+# =====================================================================
+#  Traffic endpoints
+# =====================================================================
+
+@app.get("/api/traffic/timeline")
+async def traffic_timeline(
+    minutes: int = 60,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    src_ip: str | None = None,
+    dst_ip: str | None = None,
+    protocol: int | None = None,
+    direction: int | None = None,
+    host_ip: str | None = None,
+    current: User = Depends(get_current_user),
 ):
-    rows = await db.fetch_traffic_stats_filtered(start_time, end_time, src_ip, dst_ip, protocol, direction, host_ip)
-    return [{"timestamp": row[0].isoformat(), "packets": row[1], "bytes": row[2]} for row in rows]
+    rows = await db.fetch_traffic_timeline(
+        minutes, start_time, end_time, src_ip, dst_ip, protocol, direction, host_ip
+    )
+    return [
+        {"timestamp": r[0].isoformat(), "packets": r[1], "bytes": r[2]}
+        for r in rows
+    ]
 
-@app.get("/api/topology", response_model=list[TopologyLink])
-async def get_topology(
-    start_time: str = None,
-    end_time: str = None,
-    src_ip: str = None,
-    dst_ip: str = None,
-    protocol: int = None,
-    direction: int = None,
-    min_packets: int = 10,
-    current_user: User = Depends(get_current_user)
-):
-    rows = await db.fetch_topology_filtered(start_time, end_time, src_ip, dst_ip, protocol, direction, min_packets)
-    return [{"src": row[0], "dst": row[1], "packets": row[2], "bytes": row[3]} for row in rows]
 
-@app.get("/api/hosts", response_model=list[HostInfo])
-async def get_hosts(current_user: User = Depends(get_current_user)):
+@app.get("/api/traffic/by_protocol")
+async def traffic_by_protocol(minutes: int = 60,
+                              current: User = Depends(get_current_user)):
+    rows = await db.fetch_traffic_by_protocol(minutes)
+    return [{"protocol": r[0], "packets": r[1], "bytes": r[2]} for r in rows]
+
+
+@app.get("/api/traffic/by_port")
+async def traffic_by_port(minutes: int = 60, port_type: str = "dst",
+                          current: User = Depends(get_current_user)):
+    rows = await db.fetch_traffic_by_port(minutes, port_type)
+    return [{"port": r[0], "packets": r[1], "bytes": r[2]} for r in rows]
+
+
+@app.get("/api/traffic/by_direction")
+async def traffic_by_direction(minutes: int = 60,
+                               current: User = Depends(get_current_user)):
+    rows = await db.fetch_traffic_by_direction(minutes)
+    return [{"direction": r[0], "packets": r[1], "bytes": r[2]} for r in rows]
+
+
+@app.get("/api/traffic/by_subnet")
+async def traffic_by_subnet(minutes: int = 60, limit: int = 30,
+                            current: User = Depends(get_current_user)):
+    rows = await db.fetch_traffic_by_subnet(minutes, limit)
+    return [
+        {"src_subnet": r[0], "dst_subnet": r[1],
+         "packets": r[2], "bytes": r[3]}
+        for r in rows
+    ]
+
+
+@app.get("/api/traffic/topology")
+async def traffic_topology(minutes: int = 60, min_packets: int = 10,
+                           limit: int = 200,
+                           current: User = Depends(get_current_user)):
+    rows = await db.fetch_topology(minutes, min_packets, limit)
+    return [
+        {"src": r[0], "dst": r[1], "protocol": r[2],
+         "packets": r[3], "bytes": r[4]}
+        for r in rows
+    ]
+
+
+@app.get("/api/traffic/top_sources")
+async def traffic_top_sources(minutes: int = 60, limit: int = 20,
+                              current: User = Depends(get_current_user)):
+    rows = await db.fetch_top_sources(minutes, limit)
+    return [{"ip": r[0], "packets": r[1], "bytes": r[2]} for r in rows]
+
+
+@app.get("/api/traffic/top_targets")
+async def traffic_top_targets(minutes: int = 60, limit: int = 20,
+                              current: User = Depends(get_current_user)):
+    rows = await db.fetch_top_targets(minutes, limit)
+    return [{"ip": r[0], "packets": r[1], "bytes": r[2]} for r in rows]
+
+
+# =====================================================================
+#  Hosts
+# =====================================================================
+
+@app.get("/api/hosts")
+async def hosts(current: User = Depends(get_current_user)):
     rows = await db.fetch_hosts()
-    # Преобразуем строку JSON interfaces обратно в dict
-    result = []
-    for row in rows:
-        row_dict = dict(row)
-        if isinstance(row_dict.get("interfaces"), str):
-            row_dict["interfaces"] = json.loads(row_dict["interfaces"])
-        result.append(row_dict)
-    return result
+    return [dict(r) for r in rows]
 
-@app.get("/api/alerts", response_model=list[AlertOut])
-async def get_alerts(
-    start_time: str = None,
-    end_time: str = None,
-    src_ip: str = None,
-    dst_ip: str = None,
-    protocol: int = None,
-    direction: int = None,
-    anomaly_type: str = None,
-    limit: int = 100,
-    current_user: User = Depends(get_current_user)
+
+@app.get("/api/hosts/status")
+async def hosts_status(current: User = Depends(get_current_user)):
+    rows = await db.fetch_host_status()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/hosts/{host_ip}/traffic")
+async def host_traffic(host_ip: str, minutes: int = 60,
+                       current: User = Depends(get_current_user)):
+    rows = await db.fetch_host_traffic(host_ip, minutes)
+    return [
+        {"timestamp": r[0].isoformat(),
+         "packets_sent": r[1], "bytes_sent": r[2],
+         "packets_recv": r[3], "bytes_recv": r[4]}
+        for r in rows
+    ]
+
+
+# =====================================================================
+#  Alerts
+# =====================================================================
+
+@app.get("/api/alerts")
+async def alerts(
+    limit: int = 200,
+    minutes: int | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
+    severity: str | None = None,
+    detector: str | None = None,
+    view: str | None = None,
+    src_ip: str | None = None,
+    dst_ip: str | None = None,
+    protocol: int | None = None,
+    current: User = Depends(get_current_user),
 ):
-    rows = await db.fetch_alerts_filtered(start_time, end_time, src_ip, dst_ip, protocol, direction, anomaly_type, limit)
-    return [dict(row) for row in rows]
+    rows = await db.fetch_alerts(
+        limit, minutes, start_time, end_time,
+        severity, detector, view, src_ip, dst_ip, protocol,
+    )
+    return [dict(r) for r in rows]
 
-@app.get("/api/host_traffic", response_model=list[TrafficPoint])
-async def get_host_traffic(
-    host_ip: str,
-    start_time: str = None,
-    end_time: str = None,
-    current_user: User = Depends(get_current_user)
-):
-    rows = await db.fetch_host_traffic(host_ip, start_time, end_time)
-    return [{"timestamp": row[0].isoformat(), "packets": row[1], "bytes": row[2]} for row in rows]
 
-@app.get("/api/protocol_stats")
-async def get_protocol_stats(
-    start_time: str = None,
-    end_time: str = None,
-    current_user: User = Depends(get_current_user)
-):
-    rows = await db.fetch_protocol_stats(start_time, end_time)
-    return [{"protocol": row[0], "packets": row[1], "bytes": row[2]} for row in rows]
+@app.get("/api/alerts/timeline")
+async def alerts_timeline(minutes: int = 60,
+                          current: User = Depends(get_current_user)):
+    rows = await db.fetch_alert_timeline(minutes)
+    return [
+        {"timestamp": r[0].isoformat(),
+         "total": r[1], "critical": r[2], "warning": r[3], "info": r[4]}
+        for r in rows
+    ]
 
-@app.get("/api/port_stats")
-async def get_port_stats(
-    start_time: str = None,
-    end_time: str = None,
-    current_user: User = Depends(get_current_user)
-):
-    rows = await db.fetch_port_stats(start_time, end_time)
-    return [{"port": row[0], "packets": row[1], "bytes": row[2]} for row in rows]
 
-# ---- Статика ----
-@app.get("/")
-async def root():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"message": "Frontend not built"}
+@app.get("/api/alerts/by_view")
+async def alerts_by_view(minutes: int = 60,
+                         current: User = Depends(get_current_user)):
+    rows = await db.fetch_alert_by_view(minutes)
+    return [{"view": r[0], "count": r[1]} for r in rows]
 
-assets_path = os.path.join(STATIC_DIR, "assets")
-if os.path.exists(assets_path):
-    app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
-@app.get("/{full_path:path}")
-async def catch_all(full_path: str):
-    if full_path.startswith("api/") or full_path.startswith("ws"):
-        raise HTTPException(status_code=404, detail="Not found")
-    file_path = os.path.join(STATIC_DIR, full_path)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        return FileResponse(file_path)
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"message": "Frontend not built"}
+@app.get("/api/alerts/by_severity")
+async def alerts_by_severity(minutes: int = 60,
+                             current: User = Depends(get_current_user)):
+    rows = await db.fetch_alert_by_severity(minutes)
+    return [{"severity": r[0], "count": r[1]} for r in rows]
 
-# ---- WebSocket ----
+
+@app.get("/api/alerts/top_targets")
+async def alerts_top_targets(minutes: int = 60, limit: int = 10,
+                             current: User = Depends(get_current_user)):
+    rows = await db.fetch_top_alert_targets(minutes, limit)
+    return [{"ip": r[0], "count": r[1], "max_z": r[2]} for r in rows]
+
+
+@app.get("/api/alerts/top_sources")
+async def alerts_top_sources(minutes: int = 60, limit: int = 10,
+                             current: User = Depends(get_current_user)):
+    rows = await db.fetch_top_alert_sources(minutes, limit)
+    return [{"ip": r[0], "count": r[1], "max_z": r[2]} for r in rows]
+
+
+# =====================================================================
+#  WebSocket — real-time alerts
+# =====================================================================
+
+@app.websocket("/ws/alerts")
+async def ws_alerts(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()   # ping/pong keepalive
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    # В реальности можно проверить токен через query параметр
+async def ws_alias(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
@@ -209,17 +362,27 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# ---- Старт/остановка ----
-@app.on_event("startup")
-async def startup():
-    await db.connect()
-    # Создаём админа в PostgreSQL
-    pg = next(get_postgres_session())
-    init_admin(pg)
-    # Запускаем консьюмеры в фоновых задачах
-    asyncio.create_task(consume_alerts())
-    asyncio.create_task(consume_host_info())
+# =====================================================================
+#  Frontend (SPA)
+# =====================================================================
 
-@app.on_event("shutdown")
-async def shutdown():
-    await db.close()
+@app.get("/")
+async def root():
+    idx = os.path.join(STATIC_DIR, "index.html")
+    return FileResponse(idx) if os.path.exists(idx) else {"msg": "no frontend"}
+
+
+assets = os.path.join(STATIC_DIR, "assets")
+if os.path.exists(assets):
+    app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+
+@app.get("/{full_path:path}")
+async def spa(full_path: str):
+    if full_path.startswith(("api/", "ws/")):
+        raise HTTPException(status_code=404, detail="Not found")
+    p = os.path.join(STATIC_DIR, full_path)
+    if os.path.isfile(p):
+        return FileResponse(p)
+    idx = os.path.join(STATIC_DIR, "index.html")
+    return FileResponse(idx) if os.path.exists(idx) else {"msg": "no frontend"}

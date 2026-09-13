@@ -1,50 +1,66 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from .config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, ADMIN_EMAIL
+from .config import (
+    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, ADMIN_EMAIL,
+)
+
 
 class ConnectionManager:
+    """Менеджер WebSocket-подключений."""
     def __init__(self):
-        self.active_connections = []
+        self.active: list = []
 
-    async def connect(self, websocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
+    async def connect(self, ws):
+        await ws.accept()
+        self.active.append(ws)
 
-    def disconnect(self, websocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    def disconnect(self, ws):
+        if ws in self.active:
+            self.active.remove(ws)
 
     async def broadcast(self, message: str):
-        for conn in self.active_connections:
+        dead = []
+        for ws in self.active:
             try:
-                await conn.send_text(message)
-            except:
-                pass
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
 
 manager = ConnectionManager()
 
+
 async def send_email_alert(alert: dict):
-    if not SMTP_USER or not SMTP_PASSWORD:
+    if not SMTP_HOST or not SMTP_USER:
         return
-    msg = MIMEMultipart()
-    msg["From"] = SMTP_USER
-    msg["To"] = ADMIN_EMAIL
-    msg["Subject"] = f"Traffic Anomaly Alert: {alert['src_ip']} -> {alert['dst_ip']}"
-    body = f"""
-    Detected anomaly at {alert['timestamp']}
-    Source: {alert['src_ip']}:{alert['src_port']}
-    Destination: {alert['dst_ip']}:{alert['dst_port']}
-    Protocol: {alert['protocol']}
-    Packets: {alert['packet_count']} (threshold: {alert['threshold_count']})
-    Bytes: {alert['byte_sum']} (threshold: {alert['threshold_bytes']})
-    Type: {alert['anomaly_type']}
-    """
-    msg.attach(MIMEText(body, "plain"))
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
+        msg = MIMEMultipart()
+        msg["From"]    = SMTP_USER
+        msg["To"]      = ADMIN_EMAIL
+        msg["Subject"] = (
+            f"[{alert.get('severity','?').upper()}] "
+            f"{alert.get('view','?')}: "
+            f"{alert.get('src_ip','')} → {alert.get('dst_ip','')}"
+        )
+        body = (
+            f"Anomaly detected at {alert.get('timestamp')}\n"
+            f"Detector: {alert.get('detector')} / {alert.get('view')}\n"
+            f"Source:      {alert.get('src_ip')}:{alert.get('src_port')}\n"
+            f"Destination: {alert.get('dst_ip')}:{alert.get('dst_port')}\n"
+            f"Protocol:    {alert.get('protocol')}\n"
+            f"Packets:     {alert.get('packet_count')}\n"
+            f"Bytes:       {alert.get('byte_sum')}\n"
+            f"Z-score:     {alert.get('z_score')}\n"
+            f"Type:        {alert.get('anomaly_type')}\n"
+            f"Severity:    {alert.get('severity')}\n"
+        )
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASSWORD)
+            s.send_message(msg)
     except Exception as e:
-        print(f"Email error: {e}")
+        print(f"[email] ошибка: {e}")
